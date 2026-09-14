@@ -1,0 +1,16 @@
+# SwiftFormat defaults tuned for ThermalControl.
+# NOTE: watch for the two DO-NOT-MODIFY banner blocks (FanController, BatteryController)
+# and re-check the byte/timing content after formatting those files.
+
+--swiftversion 5.10
+--indent spaces 2
+
+--self insert
+--selfrequired init
+
+--stripunusedargs closure-only
+
+--rules indent,braces,trailingSpace,linebreakAtEndOfFile,todos,spaceAroundOperators,spaceInsideParens,spaceAroundBraces,strongOutlets,enumNamespaces,hoistTry
+
+# Do NOT apply any rule that renames symbols or rewrites signatures (XPC @objc protocol).
+--exclude ThermalControl.xcodeproj,.build-release,dist

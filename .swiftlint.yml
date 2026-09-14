@@ -1,0 +1,67 @@
+# SwiftLint configuration for ThermalControl
+# Run: swiftlint lint --strict in CI; warnings are acceptable locally during the refactor.
+
+included:
+  - App
+  - Helper
+  - Shared
+  - Tests
+
+excluded:
+  - ThermalControl.xcodeproj
+  - .build-release
+  - .build
+
+opt_in_rules:
+  - empty_count
+  - empty_string
+  - force_unwrapping
+  - force_cast
+  - legacy_random
+  - overridden_superCall
+  - private_outlet
+  - private_action
+  - sorted_first_last
+  - vertical_whitespace_closing_braces
+
+disabled_rules:
+  # High ceilings while god-objects are being split (Phases 3-5); tighten afterwards.
+  - type_body_length
+  - file_length
+  - function_body_length
+
+# --- Severity overrides ---
+force_unwrapping: error
+force_cast: error
+force_try: error
+
+line_length:
+  warning: 120
+  error: 160
+
+cyclomatic_complexity:
+  warning: 10
+  error: 20
+
+type_name:
+  min_length: 3
+  max_length:
+    warning: 45
+    error: 60
+
+identifier_name:
+  min_length: 2
+  max_length:
+    warning: 45
+  excluded:
+    - id
+    - smc
+    - xpc
+    - ok
+    - io
+    - tc
+    - r
+    - d
+    - p
+
+reporter: "xcode"

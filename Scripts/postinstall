@@ -1,0 +1,53 @@
+#!/bin/bash
+# Chạy với quyền root khi cài .pkg
+set -euo pipefail
+APP="/Applications/Thermal Control.app"
+HELPER_SRC="$APP/Contents/MacOS/ThermalControlHelper"
+HELPER_NAME="ThermalControlHelper"
+LABEL="com.thermalcontrol.helper"
+DEST_HELPER="/Library/PrivilegedHelperTools/${HELPER_NAME}"
+DEST_PLIST="/Library/LaunchDaemons/${LABEL}.plist"
+
+if [[ ! -x "$HELPER_SRC" ]]; then
+  echo "Không thấy helper trong app: $HELPER_SRC"
+  exit 0
+fi
+
+launchctl bootout "system/${LABEL}" 2>/dev/null || true
+mkdir -p /Library/PrivilegedHelperTools
+cp -f "$HELPER_SRC" "$DEST_HELPER"
+chown root:wheel "$DEST_HELPER"
+chmod 755 "$DEST_HELPER"
+
+cat > "$DEST_PLIST" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>${LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${DEST_HELPER}</string>
+    </array>
+    <key>MachServices</key>
+    <dict>
+        <key>${LABEL}</key>
+        <true/>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/thermalcontrol-helper.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/thermalcontrol-helper.err</string>
+</dict>
+</plist>
+PLIST
+
+chown root:wheel "$DEST_PLIST"
+chmod 644 "$DEST_PLIST"
+launchctl bootstrap system "$DEST_PLIST" 2>/dev/null || launchctl load -w "$DEST_PLIST"
+exit 0

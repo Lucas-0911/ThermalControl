@@ -1,0 +1,28 @@
+# Build artifacts
+.build*/
+.build-release/
+dist/
+*.dmg
+*.pkg
+
+# XcodeGen generates the Xcode project from project.yml
+ThermalControl.xcodeproj/
+*.xcworkspace/
+
+# Xcode user state
+xcuserdata/
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+
+# macOS
+.DS_Store
+
+# Code-signing artifacts (never commit DER data)
+codesign*
+*.cer
+*.p12
+*.mobileprovision
+
+# SwiftPM / SPM caches
+.build/
