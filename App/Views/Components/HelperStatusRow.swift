@@ -2,6 +2,8 @@ import SwiftUI
 
 struct HelperStatusRow: View {
     @EnvironmentObject var vm: ThermalViewModel
+    @EnvironmentObject var fan: FanViewModel
+    @EnvironmentObject var battery: BatteryViewModel
     var detailed = false
 
     var body: some View {
@@ -12,8 +14,8 @@ struct HelperStatusRow: View {
                 if detailed {
                     LabeledContent(L10n.t("helper"), value: vm.helperStatusText)
                     LabeledContent("SMAppService", value: vm.smAppServiceState)
-                    LabeledContent(L10n.t("helper.fan"), value: vm.fanControl ? L10n.t("yes") : L10n.t("no"))
-                    LabeledContent(L10n.t("helper.battery"), value: vm.batteryControl ? L10n.t("yes") : L10n.t("no"))
+                    LabeledContent(L10n.t("helper.fan"), value: fan.fanControl ? L10n.t("yes") : L10n.t("no"))
+                    LabeledContent(L10n.t("helper.battery"), value: battery.batteryControl ? L10n.t("yes") : L10n.t("no"))
                 } else {
                     Text(vm.helperStatusText)
                         .font(.caption)

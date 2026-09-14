@@ -2,6 +2,8 @@ import SwiftUI
 
 struct MenuBarView: View {
     @EnvironmentObject var vm: ThermalViewModel
+    @EnvironmentObject var fan: FanViewModel
+    @EnvironmentObject var battery: BatteryViewModel
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
 
@@ -60,8 +62,8 @@ struct MenuBarView: View {
     private var summary: String {
         var parts: [String] = []
         if let t = vm.hottestTemp { parts.append("\(Int(t.rounded()))°") }
-        if let rpm = vm.fans.first?.actualRPM, rpm > 0 { parts.append("\(Int(rpm)) RPM") }
-        if vm.showBattery { parts.append("\(vm.batteryPercent)%") }
+        if let rpm = fan.fans.first?.actualRPM, rpm > 0 { parts.append("\(Int(rpm)) RPM") }
+        if battery.showBattery { parts.append("\(battery.batteryPercent)%") }
         return parts.isEmpty ? vm.helperStatusText : parts.joined(separator: "  ·  ")
     }
 

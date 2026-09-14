@@ -2,6 +2,8 @@ import SwiftUI
 
 struct BatteryPanel: View {
     @EnvironmentObject var vm: ThermalViewModel
+    @EnvironmentObject var battery: BatteryViewModel
+    @EnvironmentObject var power: PowerViewModel
     var compact: Bool
 
     var body: some View {
@@ -12,7 +14,7 @@ struct BatteryPanel: View {
                     .fontDesign(.rounded)
                     .foregroundStyle(TCTheme.lime)
             }
-            if !vm.showBattery {
+            if !battery.showBattery {
                 Text(L10n.t("battery.none"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -27,11 +29,11 @@ struct BatteryPanel: View {
     private var compactBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text("\(vm.batteryPercent)%")
+                Text("\(battery.batteryPercent)%")
                     .font(.system(size: 28, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(vm.powerInLabel)
+                    Text(battery.powerInLabel)
                         .font(.caption.weight(.bold))
                         .fontDesign(.rounded)
                         .foregroundStyle(TCTheme.sun)
@@ -44,34 +46,10 @@ struct BatteryPanel: View {
 
             powerCharts(compact: true)
 
-            HStack(spacing: 8) {
-                ChoicePill(title: L10n.t("battery.full"), symbol: "battery.100", selected: vm.chargeMode == .full, tint: TCTheme.lime, enabled: true) {
-                    vm.setChargeFull()
-                }
-                ChoicePill(title: L10n.t("mode.custom"), symbol: "percent", selected: vm.chargeMode == .custom, tint: TCTheme.grape, enabled: true) {
-                    vm.setChargeCustom()
-                }
-            }
+            chargePills
 
-            if vm.chargeMode == .custom {
-                ConfigNumberRow(
-                    title: L10n.t("battery.min"),
-                    unit: "%",
-                    value: vm.chargeLowerBinding,
-                    tint: TCTheme.mint,
-                    enabled: true,
-                    onCommit: { vm.applyChargeLimit() },
-                    onLive: { vm.scheduleChargeApply() }
-                )
-                ConfigNumberRow(
-                    title: L10n.t("battery.max"),
-                    unit: "%",
-                    value: vm.chargePercentBinding,
-                    tint: TCTheme.grape,
-                    enabled: true,
-                    onCommit: { vm.applyChargeLimit() },
-                    onLive: { vm.scheduleChargeStop() }
-                )
+            if battery.chargeMode == .custom {
+                chargeRows(maxTint: TCTheme.grape)
             }
         }
     }
@@ -79,11 +57,11 @@ struct BatteryPanel: View {
     private var detailBlock: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(vm.batteryPercent)%")
+                Text("\(battery.batteryPercent)%")
                     .font(.system(size: 36, weight: .heavy, design: .rounded))
                     .monospacedDigit()
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(vm.powerInLabel)
+                    Text(battery.powerInLabel)
                         .font(.callout.weight(.bold))
                         .foregroundStyle(TCTheme.sun)
                     Text(detailPowerFootnote)
@@ -91,8 +69,8 @@ struct BatteryPanel: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if vm.voltageMV > 0 {
-                    Text(String(format: "%.1fV", vm.voltageMV / 1000))
+                if battery.voltageMV > 0 {
+                    Text(String(format: "%.1fV", battery.voltageMV / 1000))
                         .font(.caption.weight(.bold).monospacedDigit())
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -100,50 +78,26 @@ struct BatteryPanel: View {
                 }
             }
 
-            ProgressView(value: Double(vm.batteryPercent), total: 100)
-                .tint(vm.batteryPercent < 20 ? TCTheme.peach : TCTheme.lime)
+            ProgressView(value: Double(battery.batteryPercent), total: 100)
+                .tint(battery.batteryPercent < 20 ? TCTheme.peach : TCTheme.lime)
                 .scaleEffect(x: 1, y: 1.4, anchor: .center)
 
             powerCharts(compact: false)
 
-            Text(vm.chargeStatusLabel)
+            Text(battery.chargeStatusLabel)
                 .font(.caption.weight(.semibold))
                 .fontDesign(.rounded)
-                .foregroundStyle(vm.maintainActive ? TCTheme.grape : .secondary)
+                .foregroundStyle(battery.maintainActive ? TCTheme.grape : .secondary)
 
-            HStack(spacing: 8) {
-                ChoicePill(title: L10n.t("battery.full"), symbol: "battery.100", selected: vm.chargeMode == .full, tint: TCTheme.lime, enabled: true) {
-                    vm.setChargeFull()
-                }
-                ChoicePill(title: L10n.t("mode.custom"), symbol: "percent", selected: vm.chargeMode == .custom, tint: TCTheme.grape, enabled: true) {
-                    vm.setChargeCustom()
-                }
-            }
+            chargePills
 
-            if vm.chargeMode == .custom {
-                ConfigNumberRow(
-                    title: L10n.t("battery.min"),
-                    unit: "%",
-                    value: vm.chargeLowerBinding,
-                    tint: TCTheme.mint,
-                    enabled: true,
-                    onCommit: { vm.applyChargeLimit() },
-                    onLive: { vm.scheduleChargeApply() }
-                )
-                ConfigNumberRow(
-                    title: L10n.t("battery.max"),
-                    unit: "%",
-                    value: vm.chargePercentBinding,
-                    tint: TCTheme.lime,
-                    enabled: true,
-                    onCommit: { vm.applyChargeLimit() },
-                    onLive: { vm.scheduleChargeStop() }
-                )
+            if battery.chargeMode == .custom {
+                chargeRows(maxTint: TCTheme.lime)
             }
 
             Toggle(L10n.t("battery.force"), isOn: Binding(
-                get: { vm.forceDischarge },
-                set: { vm.setForceDischarge($0) }
+                get: { battery.forceDischarge },
+                set: { battery.setForceDischarge($0) }
             ))
             .tint(TCTheme.peach)
             .disabled(!vm.controlsEnabled)
@@ -153,18 +107,52 @@ struct BatteryPanel: View {
         }
     }
 
+    private var chargePills: some View {
+        HStack(spacing: 8) {
+            ChoicePill(title: L10n.t("battery.full"), symbol: "battery.100", selected: battery.chargeMode == .full, tint: TCTheme.lime, enabled: true) {
+                battery.setChargeFull()
+            }
+            ChoicePill(title: L10n.t("mode.custom"), symbol: "percent", selected: battery.chargeMode == .custom, tint: TCTheme.grape, enabled: true) {
+                battery.setChargeCustom()
+            }
+        }
+    }
+
+    private func chargeRows(maxTint: Color) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+            ConfigNumberRow(
+                title: L10n.t("battery.min"),
+                unit: "%",
+                value: battery.chargeLowerBinding,
+                tint: TCTheme.mint,
+                enabled: true,
+                onCommit: { battery.applyChargeLimit() },
+                onLive: { battery.scheduleChargeApply() }
+            )
+            ConfigNumberRow(
+                title: L10n.t("battery.max"),
+                unit: "%",
+                value: battery.chargePercentBinding,
+                tint: maxTint,
+                enabled: true,
+                onCommit: { battery.applyChargeLimit() },
+                onLive: { battery.scheduleChargeStop() }
+            )
+        }
+    }
+
     private func powerCharts(compact: Bool) -> some View {
         HStack(alignment: .top, spacing: compact ? 8 : 12) {
             PowerSparkline(
-                samples: vm.powerHistory,
-                maxWatts: vm.powerChartMax,
+                samples: power.powerHistory,
+                maxWatts: power.powerChartMax,
                 compact: compact,
                 title: L10n.t("power.chart"),
                 tint: TCTheme.sun
             )
             PowerSparkline(
-                samples: vm.usageHistory,
-                maxWatts: vm.usageChartMax,
+                samples: power.usageHistory,
+                maxWatts: power.usageChartMax,
                 compact: compact,
                 title: L10n.t("usage.chart"),
                 tint: TCTheme.peach
@@ -173,7 +161,7 @@ struct BatteryPanel: View {
     }
 
     private var pinCurrentText: String {
-        let a = vm.amperageMA / 1000
+        let a = battery.amperageMA / 1000
         if abs(a) < 0.05 { return L10n.t("battery.current.zero") }
         if a > 0 { return L10n.t("battery.current.charge", a) }
         return L10n.t("battery.current.discharge", a)
@@ -181,10 +169,10 @@ struct BatteryPanel: View {
 
     private var detailPowerFootnote: String {
         var parts: [String] = []
-        if vm.adapterWatts > 0 {
-            parts.append(L10n.t("power.adapter", vm.adapterWatts))
+        if battery.adapterWatts > 0 {
+            parts.append(L10n.t("power.adapter", battery.adapterWatts))
         }
-        if let name = vm.adapterName, !name.isEmpty {
+        if let name = battery.adapterName, !name.isEmpty {
             parts.append(name)
         }
         parts.append(pinCurrentText)

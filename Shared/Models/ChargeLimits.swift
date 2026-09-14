@@ -15,9 +15,15 @@ struct ChargeLimits: Equatable {
     let lower: Int
 
     init(upper: Int, lower: Int) {
-        let u = min(Self.maxPercent, max(Self.minPercent, upper))
+        let u = Self.clampUpper(upper)
         self.upper = u
         self.lower = min(u - Self.minGap, max(Self.minPercent, lower))
+    }
+
+    /// Upper-bound-only clamp, used by input bindings before the full
+    /// (upper, lower) pair is known.
+    static func clampUpper(_ value: Int) -> Int {
+        min(maxPercent, max(minPercent, value))
     }
 
     /// Defaults seen in the UI for a fresh install.

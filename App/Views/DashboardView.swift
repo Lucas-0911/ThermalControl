@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DashboardView: View {
     @EnvironmentObject var vm: ThermalViewModel
+    @EnvironmentObject var fan: FanViewModel
+    @EnvironmentObject var battery: BatteryViewModel
     @EnvironmentObject var lang: LanguageSettings
 
     var body: some View {
@@ -94,22 +96,22 @@ struct DashboardView: View {
                 value: fanMetric,
                 symbol: "fanblades.fill",
                 tint: TCTheme.cyan,
-                footnote: vm.desiredFanMode == .manual ? L10n.t("mode.custom.rpm", vm.manualRPM) : modeName
+                footnote: fan.desiredFanMode == .manual ? L10n.t("mode.custom.rpm", fan.manualRPM) : modeName
             )
             MetricTile(
                 title: L10n.t("battery"),
-                value: vm.showBattery ? "\(vm.batteryPercent)%" : "—",
+                value: battery.showBattery ? "\(battery.batteryPercent)%" : "—",
                 symbol: "battery.100",
                 tint: TCTheme.lime,
-                footnote: vm.showBattery ? vm.chargeStatusLabel : L10n.t("no.battery")
+                footnote: battery.showBattery ? battery.chargeStatusLabel : L10n.t("no.battery")
             )
             MetricTile(
                 title: L10n.t("metric.power"),
                 value: powerMetric,
                 symbol: "bolt.fill",
                 tint: TCTheme.sun,
-                footnote: vm.externalAC
-                    ? (vm.adapterWatts > 0 ? L10n.t("power.adapter", vm.adapterWatts) : L10n.t("power.plugged"))
+                footnote: battery.externalAC
+                    ? (battery.adapterWatts > 0 ? L10n.t("power.adapter", battery.adapterWatts) : L10n.t("power.plugged"))
                     : L10n.t("power.on.battery")
             )
             MetricTile(
@@ -123,12 +125,12 @@ struct DashboardView: View {
     }
 
     private var fanMetric: String {
-        guard let rpm = vm.fans.first?.actualRPM, rpm > 0 else { return "—" }
+        guard let rpm = fan.fans.first?.actualRPM, rpm > 0 else { return "—" }
         return "\(Int(rpm))"
     }
 
     private var modeName: String {
-        switch vm.desiredFanMode {
+        switch fan.desiredFanMode {
         case .system: return L10n.t("mode.auto")
         case .quiet: return L10n.t("mode.quiet")
         case .max: return L10n.t("mode.max")
@@ -137,12 +139,12 @@ struct DashboardView: View {
     }
 
     private var powerMetric: String {
-        if vm.systemInWatts >= 0.3 {
-            return String(format: "%.0fW", vm.systemInWatts)
+        if battery.systemInWatts >= 0.3 {
+            return String(format: "%.0fW", battery.systemInWatts)
         }
-        if vm.externalAC, vm.adapterWatts > 0 {
-            return String(format: "%.0fW", vm.adapterWatts)
+        if battery.externalAC, battery.adapterWatts > 0 {
+            return String(format: "%.0fW", battery.adapterWatts)
         }
-        return vm.externalAC ? "AC" : "—"
+        return battery.externalAC ? "AC" : "—"
     }
 }

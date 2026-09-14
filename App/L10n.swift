@@ -3,7 +3,7 @@ import SwiftUI
 
 final class LanguageSettings: ObservableObject {
     static let shared = LanguageSettings()
-    static let storageKey = "appLanguage"
+    static let storageKey = AppSettings.Key.appLanguage
 
     @Published var selection: String {
         didSet { UserDefaults.standard.set(selection, forKey: Self.storageKey) }

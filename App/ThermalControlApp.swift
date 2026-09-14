@@ -35,6 +35,9 @@ struct ThermalControlApp: App {
         Window("Thermal Control", id: "main") {
             DashboardView()
                 .environmentObject(vm)
+                .environmentObject(vm.fan)
+                .environmentObject(vm.battery)
+                .environmentObject(vm.power)
                 .environmentObject(lang)
                 .environment(\.locale, lang.locale)
                 .id(lang.selection)
@@ -48,6 +51,9 @@ struct ThermalControlApp: App {
         MenuBarExtra {
             MenuBarView()
                 .environmentObject(vm)
+                .environmentObject(vm.fan)
+                .environmentObject(vm.battery)
+                .environmentObject(vm.power)
                 .environmentObject(lang)
                 .environment(\.locale, lang.locale)
                 .id(lang.selection)
