@@ -65,3 +65,52 @@ final class XPCClient {
         proxy?.getThermalSnapshot { done($0) } ?? done([])
     }
 }
+
+/// Thin async wrappers (Phase 3a). The XPC protocol itself stays `@objc`
+/// completion-based — `NSXPCInterface` requires it — but callers (the
+/// view models) can now `await` instead of nesting completion handlers.
+extension XPCClient {
+    func ping() async -> Bool {
+        await withCheckedContinuation { cont in ping { cont.resume(returning: $0) } }
+    }
+
+    func capabilities() async -> Capabilities? {
+        await withCheckedContinuation { cont in capabilities { cont.resume(returning: $0) } }
+    }
+
+    func fanStatus() async -> FanStatus? {
+        await withCheckedContinuation { cont in fanStatus { cont.resume(returning: $0) } }
+    }
+
+    func batteryStatus() async -> BatteryStatus? {
+        await withCheckedContinuation { cont in batteryStatus { cont.resume(returning: $0) } }
+    }
+
+    func setFanMode(_ mode: FanMode) async -> (Bool, String?) {
+        await withCheckedContinuation { cont in setFanMode(mode) { ok, err in cont.resume(returning: (ok, err)) } }
+    }
+
+    func setFanRPM(_ rpm: Int, index: Int) async -> (Bool, String?) {
+        await withCheckedContinuation { cont in setFanRPM(rpm, index: index) { ok, err in cont.resume(returning: (ok, err)) } }
+    }
+
+    func setChargeLimit(upper: Int, lower: Int) async -> (Bool, String?) {
+        await withCheckedContinuation { cont in setChargeLimit(upper: upper, lower: lower) { ok, err in cont.resume(returning: (ok, err)) } }
+    }
+
+    func setCharging(_ on: Bool) async -> (Bool, String?) {
+        await withCheckedContinuation { cont in setCharging(on) { ok, err in cont.resume(returning: (ok, err)) } }
+    }
+
+    func setForceDischarge(_ on: Bool) async -> (Bool, String?) {
+        await withCheckedContinuation { cont in setForceDischarge(on) { ok, err in cont.resume(returning: (ok, err)) } }
+    }
+
+    func restore() async -> (Bool, String?) {
+        await withCheckedContinuation { cont in restore { ok, err in cont.resume(returning: (ok, err)) } }
+    }
+
+    func temps() async -> [TempReading] {
+        await withCheckedContinuation { cont in temps { cont.resume(returning: $0) } }
+    }
+}

@@ -1,5 +1,6 @@
 import Foundation
 import IOKit
+import os
 
 enum SMCType {
     case ui8, ui16, ui32, si8, si16, si32, flt, fpe2, other
@@ -109,6 +110,9 @@ final class SMCService {
             let sp = Double(Int16(bitPattern: UInt16(bytes[0]) << 8 | UInt16(bytes[1]))) / 256
             if sp > 1, sp < 150 { return sp }
         }
+        // All three decoders failed — unusual enough to be worth a debug trace
+        // (missing keys never reach here; they fail in readBytes above).
+        Logger.smc.debug("readCelsius(\(key, privacy: .public)): all decoders failed")
         return nil
     }
 

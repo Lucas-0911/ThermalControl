@@ -1,31 +1,42 @@
 import Foundation
 import os
 
-final class HelperDelegate: NSObject, NSXPCListenerDelegate, ThermalHelperProtocol {
-    let smc = SMCService()
-    let fan: FanController
-    let battery: BatteryController
+/// `ThermalHelperProtocol` implementation + policy persistence + boot
+/// sequence. Extracted from the old `HelperDelegate` god object (Phase 3c);
+/// per-method logic is unchanged. Dependencies arrive through the
+/// `FanControlling`/`BatteryControlling`/`SMCProtocol` seams so the service
+/// can be exercised with fakes.
+final class HelperXPCService: NSObject, ThermalHelperProtocol {
+    let smc: any SMCProtocol
+    let fan: any FanControlling
+    let battery: any BatteryControlling
     let watchdog: SafetyWatchdog
-    let power = PowerObserver()
-    private let teamIDs: Set<String>
-    private let bundles: Set<String> = [TC.appBundleID]
+    private let power = PowerObserver()
 
-    override init() {
-        fan = FanController(smc: smc)
-        battery = BatteryController(smc: smc)
-        watchdog = SafetyWatchdog(smc: smc, fan: fan, battery: battery)
-        teamIDs = HelperDelegate.ownTeams()
+    init(smc: any SMCProtocol, fan: any FanControlling, battery: any BatteryControlling, watchdog: SafetyWatchdog) {
+        self.smc = smc
+        self.fan = fan
+        self.battery = battery
+        self.watchdog = watchdog
         super.init()
+    }
+
+    /// Open SMC, probe hardware, start the watchdog + sleep/wake observer and
+    /// restore the persisted policy. Called once from `main.swift`.
+    func boot() {
         do {
             try smc.open()
             fan.probe()
             battery.probe()
-            watchdog.start()
-            power.onWake = { [weak self] in self?.watchdog.onWake() }
+            Task { await watchdog.start() }
+            power.onWake = { [weak self] in
+                guard let self else { return }
+                Task { await self.watchdog.onWake() }
+            }
             power.start()
             restorePersisted()
-            let fanN = self.fan.count
-            let batFamily = self.battery.family.rawValue
+            let fanN = fan.count
+            let batFamily = battery.family.rawValue
             Logger.helper.info("fans=\(fanN, privacy: .public) battery=\(batFamily, privacy: .public)")
         } catch {
             Logger.helper.error("SMC \(error.localizedDescription, privacy: .public)")
@@ -74,24 +85,15 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, ThermalHelperProtoc
         Logger.state.info("restored persisted policy")
     }
 
-    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection c: NSXPCConnection) -> Bool {
-        guard verify(c) else {
-            Logger.helper.warning("reject pid=\(c.processIdentifier, privacy: .public) team mismatch or unsigned")
-            c.invalidate()
-            return false
-        }
-        c.exportedInterface = ThermalXPC.makeInterface()
-        c.exportedObject = self
-        c.resume()
-        return true
-    }
+    // MARK: - ThermalHelperProtocol
 
     func ping(_ token: String, reply: @escaping (Bool) -> Void) {
-        watchdog.heartbeat(); reply(true)
+        Task { await watchdog.heartbeat() }
+        reply(true)
     }
 
     func getCapabilities(reply: @escaping (Capabilities) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         let bat = battery.status()
         reply(Capabilities(
             fanCount: fan.count, fanControl: fan.canControl, ftstPresent: fan.ftstPresent,
@@ -101,43 +103,59 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, ThermalHelperProtoc
         ))
     }
 
-    func getFanStatus(reply: @escaping (FanStatus) -> Void) { watchdog.heartbeat(); reply(fan.status()) }
+    func getFanStatus(reply: @escaping (FanStatus) -> Void) {
+        Task { await watchdog.heartbeat() }
+        reply(fan.status())
+    }
+
     func setFanMode(_ mode: Int, reply: @escaping (Bool, String?) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         let r = fan.setMode(FanMode(rawValue: mode) ?? .system)
         persist()
         reply(r.0, r.1)
     }
+
     func setFanTargetRPM(_ rpm: Int, fanIndex: Int, reply: @escaping (Bool, String?) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         let r = fan.setManual(rpm: rpm, index: fanIndex)
         persist()
         reply(r.0, r.1)
     }
-    func getBatteryStatus(reply: @escaping (BatteryStatus) -> Void) { watchdog.heartbeat(); reply(battery.status()) }
+
+    func getBatteryStatus(reply: @escaping (BatteryStatus) -> Void) {
+        Task { await watchdog.heartbeat() }
+        reply(battery.status())
+    }
+
     func setChargeLimit(_ upper: Int, lower: Int, reply: @escaping (Bool, String?) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         let r = battery.setLimit(upper: upper, lower: lower)
         reply(r.0, r.1)
         persist()
     }
+
     func setChargingEnabled(_ enabled: Bool, reply: @escaping (Bool, String?) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         let r = battery.setChargingEnabled(enabled)
         reply(r.0, r.1)
         persist()
     }
+
     func setForceDischarge(_ enabled: Bool, reply: @escaping (Bool, String?) -> Void) {
-        watchdog.heartbeat(); let r = battery.setForceDischarge(enabled); persist(); reply(r.0, r.1)
+        Task { await watchdog.heartbeat() }
+        let r = battery.setForceDischarge(enabled)
+        persist()
+        reply(r.0, r.1)
     }
+
     func restoreSystemControl(reply: @escaping (Bool, String?) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         restoreAll()
         reply(true, nil)
     }
 
     func getThermalSnapshot(reply: @escaping ([TempReading]) -> Void) {
-        watchdog.heartbeat()
+        Task { await watchdog.heartbeat() }
         var out: [TempReading] = []
         for k in TC.tempKeys {
             if let v = smc.readCelsius(k) {
@@ -145,32 +163,5 @@ final class HelperDelegate: NSObject, NSXPCListenerDelegate, ThermalHelperProtoc
             }
         }
         reply(out)
-    }
-
-    private func verify(_ c: NSXPCConnection) -> Bool {
-        var code: SecCode?
-        var err = SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: c.processIdentifier] as CFDictionary, [], &code)
-        guard err == errSecSuccess, let code else { return teamIDs.isEmpty }
-        var sc: SecStaticCode?
-        err = SecCodeCopyStaticCode(code, [], &sc)
-        guard err == errSecSuccess, let sc else { return false }
-        var info: CFDictionary?
-        err = SecCodeCopySigningInformation(sc, SecCSFlags(rawValue: kSecCSSigningInformation), &info)
-        guard err == errSecSuccess, let dict = info as? [String: Any] else { return teamIDs.isEmpty }
-        if teamIDs.isEmpty { return true }
-        let team = dict[kSecCodeInfoTeamIdentifier as String] as? String
-        return team.map { teamIDs.contains($0) } ?? false
-    }
-
-    private static func ownTeams() -> Set<String> {
-        var code: SecCode?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return [] }
-        var sc: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &sc) == errSecSuccess, let sc else { return [] }
-        var info: CFDictionary?
-        guard SecCodeCopySigningInformation(sc, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let dict = info as? [String: Any],
-              let team = dict[kSecCodeInfoTeamIdentifier as String] as? String else { return [] }
-        return [team]
     }
 }

@@ -1,94 +1,93 @@
 import Foundation
 import os
 
-let delegate = HelperDelegate()
+// Wiring (was inside the old `HelperDelegate.init` god object — Phase 3c).
+let smc = SMCService()
+let fan = FanController(smc: smc)
+let battery = BatteryController(smc: smc)
+let watchdog = SafetyWatchdog(smc: smc, fan: fan, battery: battery)
+let service = HelperXPCService(smc: smc, fan: fan, battery: battery, watchdog: watchdog)
+service.boot()
+
+// MARK: - CLI diagnostics (--probe / --selftest)
+//
+// Phase 3a: DispatchSemaphore bridges replaced with top-level await +
+// withCheckedContinuation. stdout output is intentional (CLI report).
 
 if CommandLine.arguments.contains("--probe") || CommandLine.arguments.contains("--selftest") {
-    let capWait = DispatchSemaphore(value: 0)
-    var capRef: Capabilities?
-    delegate.getCapabilities { cap in
-        capRef = cap
-        print("fans=\(cap.fanCount) fanControl=\(cap.fanControl) ftst=\(cap.ftstPresent) battery=\(cap.batteryFamily) present=\(cap.batteryPresent) control=\(cap.batteryControl)")
-        let smc = delegate.smc
-        for k in ["Ftst", "FTST", "F0Md", "F0md", "CHTE", "CHIE", "CH0B", "CH0C", "B0AC"] {
-            if let inf = try? smc.info(k) {
-                let val = (try? smc.readBytes(k).1) ?? []
-                print("key \(k) type=\(inf.typeFourCC) size=\(inf.dataSize) bytes=\(val.prefix(4).map { String(format: "%02x", $0) }.joined())")
-            } else {
-                print("key \(k) MISSING")
-            }
+    let cap: Capabilities = await withCheckedContinuation { cont in
+        service.getCapabilities { cont.resume(returning: $0) }
+    }
+    print("fans=\(cap.fanCount) fanControl=\(cap.fanControl) ftst=\(cap.ftstPresent) battery=\(cap.batteryFamily) present=\(cap.batteryPresent) control=\(cap.batteryControl)")
+    let probeKeys: [SMCKey] = [.ftstLower, .ftst, .fanMode(0), .fanModeLower(0), .chTE, .chIE, .ch0B, .ch0C, .b0AC]
+    for key in probeKeys {
+        let k = key.rawValue
+        if let inf = try? smc.info(k) {
+            let val = (try? smc.readBytes(k).1) ?? []
+            print("key \(k) type=\(inf.typeFourCC) size=\(inf.dataSize) bytes=\(val.prefix(4).map { String(format: "%02x", $0) }.joined())")
+        } else {
+            print("key \(k) MISSING")
         }
-        capWait.signal()
     }
-    _ = capWait.wait(timeout: .now() + 2)
 
-    let fanWait = DispatchSemaphore(value: 0)
-    delegate.getFanStatus { st in
-        for f in st.fans {
-            print("fan\(f.index) rpm=\(Int(f.actualRPM)) min=\(Int(f.minRPM)) max=\(Int(f.maxRPM)) key=\(f.modeKey)")
-        }
-        fanWait.signal()
+    let fanStatus: FanStatus = await withCheckedContinuation { cont in
+        service.getFanStatus { cont.resume(returning: $0) }
     }
-    _ = fanWait.wait(timeout: .now() + 2)
-
-    let tmpWait = DispatchSemaphore(value: 0)
-    delegate.getThermalSnapshot { list in
-        for t in list { print("temp \(t.key)=\(Int(t.celsius.rounded()))C") }
-        tmpWait.signal()
+    for f in fanStatus.fans {
+        print("fan\(f.index) rpm=\(Int(f.actualRPM)) min=\(Int(f.minRPM)) max=\(Int(f.maxRPM)) key=\(f.modeKey)")
     }
-    _ = tmpWait.wait(timeout: .now() + 2)
 
-    if CommandLine.arguments.contains("--selftest"), capRef?.fanControl == true {
+    let temps: [TempReading] = await withCheckedContinuation { cont in
+        service.getThermalSnapshot { cont.resume(returning: $0) }
+    }
+    for t in temps { print("temp \(t.key)=\(Int(t.celsius.rounded()))C") }
+
+    if CommandLine.arguments.contains("--selftest"), cap.fanControl {
         print("TEST quiet…")
-        let q = DispatchSemaphore(value: 0)
-        delegate.setFanMode(FanMode.quiet.rawValue) { ok, err in
-            print("quiet ok=\(ok) err=\(err ?? "-")")
-            q.signal()
+        let quiet: (Bool, String?) = await withCheckedContinuation { cont in
+            service.setFanMode(FanMode.quiet.rawValue) { ok, err in cont.resume(returning: (ok, err)) }
         }
-        _ = q.wait(timeout: .now() + 15)
-        Thread.sleep(forTimeInterval: 3)
-        let after = DispatchSemaphore(value: 0)
-        delegate.getFanStatus { st in
-            for f in st.fans { print("after-quiet fan\(f.index) rpm=\(Int(f.actualRPM))") }
-            after.signal()
+        print("quiet ok=\(quiet.0) err=\(quiet.1 ?? "-")")
+        try? await Task.sleep(for: .seconds(3))
+        let afterQuiet: FanStatus = await withCheckedContinuation { cont in
+            service.getFanStatus { cont.resume(returning: $0) }
         }
-        _ = after.wait(timeout: .now() + 2)
+        for f in afterQuiet.fans { print("after-quiet fan\(f.index) rpm=\(Int(f.actualRPM))") }
         print("TEST restore system…")
-        delegate.restoreAll()
-        Thread.sleep(forTimeInterval: 1)
+        service.restoreAll()
+        try? await Task.sleep(for: .seconds(1))
 
         print("TEST allow charging (CHTE=0)…")
-        let ch = DispatchSemaphore(value: 0)
-        delegate.setChargingEnabled(true) { ok, err in
-            print("charge-enable ok=\(ok) err=\(err ?? "-")")
-            ch.signal()
+        let charge: (Bool, String?) = await withCheckedContinuation { cont in
+            service.setChargingEnabled(true) { ok, err in cont.resume(returning: (ok, err)) }
         }
-        _ = ch.wait(timeout: .now() + 4)
-        Thread.sleep(forTimeInterval: 1)
-        let bst = DispatchSemaphore(value: 0)
-        delegate.getBatteryStatus { st in
-            print("battery after-enable \(st.percent)% \(Int(st.amperageMA))mA ac=\(st.externalAC) family=\(st.keyFamily)")
-            bst.signal()
+        print("charge-enable ok=\(charge.0) err=\(charge.1 ?? "-")")
+        try? await Task.sleep(for: .seconds(1))
+        let bat: BatteryStatus = await withCheckedContinuation { cont in
+            service.getBatteryStatus { cont.resume(returning: $0) }
         }
-        _ = bst.wait(timeout: .now() + 2)
+        print("battery after-enable \(bat.percent)% \(Int(bat.amperageMA))mA ac=\(bat.externalAC) family=\(bat.keyFamily)")
         print("SELFTEST done")
     } else {
-        delegate.restoreAll()
+        service.restoreAll()
     }
     exit(0)
 }
+
+// MARK: - Daemon run loop
 
 signal(SIGTERM) { _ in
     NotificationCenter.default.post(name: Notification.Name("tc.stop"), object: nil)
 }
 
 NotificationCenter.default.addObserver(forName: Notification.Name("tc.stop"), object: nil, queue: nil) { _ in
-    delegate.restoreAll()
+    service.restoreAll()
     exit(0)
 }
 
 let listener = NSXPCListener(machServiceName: TC.machServiceName)
-listener.delegate = delegate
+let xpcDelegate = HelperXPCDelegate(service: service)
+listener.delegate = xpcDelegate
 listener.resume()
 Logger.helper.info("listening on \(TC.machServiceName, privacy: .public)")
 RunLoop.main.run()

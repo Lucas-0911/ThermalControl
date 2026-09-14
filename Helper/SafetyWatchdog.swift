@@ -1,17 +1,23 @@
 import Foundation
 import os
 
-final class SafetyWatchdog {
+/// 2-second safety loop (Phase 3a modernization: `DispatchSourceTimer` on a
+/// serial queue → actor + structured `Task` loop). Timing semantics unchanged:
+/// 2s period (`TC.batteryTickInterval`), `TC.heartbeatTimeout` (45s) fallback
+/// to System fan, thermal ceiling/hotspot enforcement with `TC.thermalHold`.
+///
+/// Actor isolation replaces the serial-queue mutual exclusion that previously
+/// protected `lastBeat`/`hotSince`/`ticks`.
+actor SafetyWatchdog {
     private let smc: any SMCProtocol
-    private let fan: FanController
-    private let battery: BatteryController
-    private let queue = DispatchQueue(label: "com.thermalcontrol.watchdog")
-    private var timer: DispatchSourceTimer?
+    private let fan: any FanControlling
+    private let battery: any BatteryControlling
+    private var loopTask: Task<Void, Never>?
     private var lastBeat = Date()
     private var hotSince: Date?
     private var ticks = 0
 
-    init(smc: any SMCProtocol, fan: FanController, battery: BatteryController) {
+    init(smc: any SMCProtocol, fan: any FanControlling, battery: any BatteryControlling) {
         self.smc = smc
         self.fan = fan
         self.battery = battery
@@ -19,22 +25,32 @@ final class SafetyWatchdog {
 
     func start() {
         lastBeat = Date()
-        let t = DispatchSource.makeTimerSource(queue: queue)
-        t.schedule(deadline: .now() + 2, repeating: 2)
-        t.setEventHandler { [weak self] in self?.tick() }
-        t.resume()
-        timer = t
+        loopTask?.cancel()
+        loopTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(TC.batteryTickInterval))
+                guard let self, !Task.isCancelled else { return }
+                await self.tick()
+            }
+        }
     }
 
-    func heartbeat() { queue.async { self.lastBeat = Date() } }
+    func stop() {
+        loopTask?.cancel()
+        loopTask = nil
+    }
 
+    func heartbeat() {
+        lastBeat = Date()
+    }
+
+    /// Re-probe SMC and re-apply policy after sleep/wake (SMC state is lost
+    /// across sleep). Previously dispatched onto the watchdog's serial queue.
     func onWake() {
-        queue.async {
-            self.fan.probe()
-            self.battery.probe()
-            _ = self.fan.apply()
-            self.battery.tick()
-        }
+        fan.probe()
+        battery.probe()
+        _ = fan.apply()
+        battery.tick()
     }
 
     private func tick() {
