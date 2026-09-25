@@ -12,8 +12,11 @@ public enum TC {
     public static let tempKeys = SMCKey.tempKeys.map(\.rawValue)
 
     public static let heartbeatInterval: TimeInterval = 5
-    public static let heartbeatTimeout: TimeInterval = 45
+    public static let heartbeatTimeout: TimeInterval = 15
     public static let uiPollInterval: TimeInterval = 3
+    public static let backgroundPollInterval: TimeInterval = 15
+    public static let menuPollInterval: TimeInterval = 2.5
+    public static let dashboardPollInterval: TimeInterval = 2
     public static let batteryTickInterval: TimeInterval = 2
     public static let powerSampleInterval: TimeInterval = 1
     public static let powerHistoryWindow: TimeInterval = 30

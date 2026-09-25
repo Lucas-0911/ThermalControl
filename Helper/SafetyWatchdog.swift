@@ -1,10 +1,13 @@
 import Foundation
 import os
+#if TESTING
+@testable import ThermalControl
+#endif
 
 /// 2-second safety loop (Phase 3a modernization: `DispatchSourceTimer` on a
 /// serial queue → actor + structured `Task` loop). Timing semantics unchanged:
-/// 2s period (`TC.batteryTickInterval`), `TC.heartbeatTimeout` (45s) fallback
-/// to System fan, thermal ceiling/hotspot enforcement with `TC.thermalHold`.
+/// 2s period (`TC.batteryTickInterval`), `TC.heartbeatTimeout` fallback to
+/// System fan + force-discharge off, thermal enforcement with `TC.thermalHold`.
 ///
 /// Actor isolation replaces the serial-queue mutual exclusion that previously
 /// protected `lastBeat`/`hotSince`/`ticks`.
@@ -15,6 +18,9 @@ actor SafetyWatchdog {
     private var loopTask: Task<Void, Never>?
     private var lastBeat = Date()
     private var hotSince: Date?
+    private var heartbeatTimedOut = false
+    private var sleeping = false
+    private var safetyFallback: (@Sendable () -> Void)?
     private var ticks = 0
 
     init(smc: any SMCProtocol, fan: any FanControlling, battery: any BatteryControlling) {
@@ -40,27 +46,53 @@ actor SafetyWatchdog {
         loopTask = nil
     }
 
+    func setSafetyFallback(_ action: @escaping @Sendable () -> Void) {
+        safetyFallback = action
+    }
+
     func heartbeat() {
         lastBeat = Date()
+        heartbeatTimedOut = false
     }
 
-    /// Re-probe SMC and re-apply policy after sleep/wake (SMC state is lost
-    /// across sleep). Previously dispatched onto the watchdog's serial queue.
+    func onSleep() {
+        sleeping = true
+        _ = fan.restoreSystem()
+        battery.disableForceDischarge()
+        safetyFallback?()
+    }
+
+    /// SMC state is lost across sleep. Re-probe it, but keep transient fan and
+    /// discharge overrides disabled until the app reconnects and commands them.
     func onWake() {
+        sleeping = false
         fan.probe()
         battery.probe()
-        _ = fan.apply()
-        battery.tick()
+        _ = fan.restoreSystem()
+        battery.disableForceDischarge()
+        lastBeat = Date()
+        heartbeatTimedOut = false
+        safetyFallback?()
     }
 
-    private func tick() {
+    /// Test seam: evaluates lifecycle safety immediately without waiting for
+    /// the production timer interval.
+    func checkSafety(now: Date = Date()) {
+        tick(now: now)
+    }
+
+    private func tick(now: Date = Date()) {
+        guard !sleeping else { return }
         ticks += 1
         battery.tick()
         enforceThermal()
         if ticks % 5 == 0, fan.policy != .system { _ = fan.apply() }
-        if Date().timeIntervalSince(lastBeat) > TC.heartbeatTimeout, fan.policy != .system {
-            Logger.watchdog.notice("heartbeat timeout → System fan")
+        if now.timeIntervalSince(lastBeat) > TC.heartbeatTimeout, !heartbeatTimedOut {
+            heartbeatTimedOut = true
+            Logger.watchdog.fault("heartbeat timeout → System fan, force discharge off")
             _ = fan.restoreSystem()
+            battery.disableForceDischarge()
+            safetyFallback?()
         }
     }
 
@@ -89,6 +121,7 @@ actor SafetyWatchdog {
                 let hotStr = String(format: "%.1f", hot)
                 Logger.watchdog.notice("thermal \(hotStr, privacy: .public) → System")
                 _ = fan.restoreSystem()
+                battery.disableForceDischarge()
             }
         } else {
             hotSince = nil

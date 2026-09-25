@@ -50,4 +50,8 @@ PLIST
 chown root:wheel "$DEST_PLIST"
 chmod 644 "$DEST_PLIST"
 launchctl bootstrap system "$DEST_PLIST" 2>/dev/null || launchctl load -w "$DEST_PLIST"
+
+# Đảm bảo quyền truy cập toàn hệ thống để Finder/Dock đọc được icon và chạy app
+chmod -R a+rX "$APP"
+
 exit 0

@@ -23,13 +23,26 @@ xcodebuild \
   -configuration Release \
   -destination 'platform=macOS' \
   -derivedDataPath "$DD" \
+  CODE_SIGNING_ALLOWED=NO \
   build
 
 APP="$DD/Build/Products/Release/$APP_NAME"
+HELPER_BIN="$DD/Build/Products/Release/ThermalControlHelper"
 if [[ ! -d "$APP" ]]; then
   echo "Không thấy app Release: $APP"
   exit 1
 fi
+
+echo "==> Code Signing Release Binaries"
+SIGN_ID="$(security find-identity -p codesigning -v | grep 'Apple Development' | head -n1 | awk -F'"' '{print $2}' || true)"
+if [[ -z "$SIGN_ID" ]]; then
+  SIGN_ID="-"
+fi
+echo "Using Signing Identity: $SIGN_ID"
+
+codesign -s "$SIGN_ID" -f -v --timestamp=none --options runtime "$HELPER_BIN"
+codesign -s "$SIGN_ID" -f -v --timestamp=none --options runtime "$APP/Contents/MacOS/ThermalControlHelper"
+codesign -s "$SIGN_ID" -f -v --timestamp=none --options runtime --entitlements "$ROOT/App/ThermalControl.entitlements" "$APP"
 
 echo "==> Chuẩn bị payload"
 rm -rf "$PKGROOT" "$SCRIPTS"
@@ -40,6 +53,9 @@ rm -f "$PKGROOT/Applications/$APP_NAME/Contents/MacOS/"*.debug.dylib \
       "$PKGROOT/Applications/$APP_NAME/Contents/MacOS/__preview.dylib" 2>/dev/null || true
 mkdir -p "$PKGROOT/Applications/$APP_NAME/Contents/Resources"
 cp "$ROOT/Scripts/install_helper.sh" "$PKGROOT/Applications/$APP_NAME/Contents/Resources/install_helper.sh"
+chmod -R 755 "$PKGROOT/Applications/$APP_NAME"
+find "$PKGROOT/Applications/$APP_NAME" -type f -exec chmod 644 {} +
+find "$PKGROOT/Applications/$APP_NAME/Contents/MacOS" -type f -exec chmod 755 {} +
 chmod 755 "$PKGROOT/Applications/$APP_NAME/Contents/Resources/install_helper.sh"
 
 cp "$ROOT/Scripts/postinstall" "$SCRIPTS/postinstall"

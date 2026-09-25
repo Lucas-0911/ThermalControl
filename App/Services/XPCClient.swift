@@ -11,7 +11,7 @@ final class XPCClient {
     }
 
     func connect() {
-        connection?.invalidate()
+        invalidate()
         // System LaunchDaemon lives in the privileged bootstrap namespace.
         let c = NSXPCConnection(machServiceName: TC.machServiceName, options: [.privileged])
         c.remoteObjectInterface = ThermalXPC.makeInterface()
@@ -19,6 +19,13 @@ final class XPCClient {
         c.invalidationHandler = { Logger.xpc.notice("connection invalidated") }
         c.resume()
         connection = c
+    }
+
+    func invalidate() {
+        connection?.interruptionHandler = nil
+        connection?.invalidationHandler = nil
+        connection?.invalidate()
+        connection = nil
     }
 
     func ping(_ done: @escaping (Bool) -> Void) {
@@ -71,46 +78,95 @@ final class XPCClient {
 /// view models) can now `await` instead of nesting completion handlers.
 extension XPCClient {
     func ping() async -> Bool {
-        await withCheckedContinuation { cont in ping { cont.resume(returning: $0) } }
+        await reply(or: false) { proxy, done in proxy.ping("hb", reply: done) }
     }
 
     func capabilities() async -> Capabilities? {
-        await withCheckedContinuation { cont in capabilities { cont.resume(returning: $0) } }
+        await reply(or: nil) { proxy, done in proxy.getCapabilities(reply: done) }
     }
 
     func fanStatus() async -> FanStatus? {
-        await withCheckedContinuation { cont in fanStatus { cont.resume(returning: $0) } }
+        await reply(or: nil) { proxy, done in proxy.getFanStatus(reply: done) }
     }
 
     func batteryStatus() async -> BatteryStatus? {
-        await withCheckedContinuation { cont in batteryStatus { cont.resume(returning: $0) } }
+        await reply(or: nil) { proxy, done in proxy.getBatteryStatus(reply: done) }
     }
 
     func setFanMode(_ mode: FanMode) async -> (Bool, String?) {
-        await withCheckedContinuation { cont in setFanMode(mode) { ok, err in cont.resume(returning: (ok, err)) } }
+        await reply(or: (false, L10n.t("error.xpc"))) { proxy, done in
+            proxy.setFanMode(mode.rawValue) { done(($0, $1)) }
+        }
     }
 
     func setFanRPM(_ rpm: Int, index: Int) async -> (Bool, String?) {
-        await withCheckedContinuation { cont in setFanRPM(rpm, index: index) { ok, err in cont.resume(returning: (ok, err)) } }
+        await reply(or: (false, L10n.t("error.xpc"))) { proxy, done in
+            proxy.setFanTargetRPM(rpm, fanIndex: index) { done(($0, $1)) }
+        }
     }
 
     func setChargeLimit(upper: Int, lower: Int) async -> (Bool, String?) {
-        await withCheckedContinuation { cont in setChargeLimit(upper: upper, lower: lower) { ok, err in cont.resume(returning: (ok, err)) } }
+        await reply(or: (false, L10n.t("error.xpc"))) { proxy, done in
+            proxy.setChargeLimit(upper, lower: lower) { done(($0, $1)) }
+        }
     }
 
     func setCharging(_ on: Bool) async -> (Bool, String?) {
-        await withCheckedContinuation { cont in setCharging(on) { ok, err in cont.resume(returning: (ok, err)) } }
+        await reply(or: (false, L10n.t("error.xpc"))) { proxy, done in
+            proxy.setChargingEnabled(on) { done(($0, $1)) }
+        }
     }
 
     func setForceDischarge(_ on: Bool) async -> (Bool, String?) {
-        await withCheckedContinuation { cont in setForceDischarge(on) { ok, err in cont.resume(returning: (ok, err)) } }
+        await reply(or: (false, L10n.t("error.xpc"))) { proxy, done in
+            proxy.setForceDischarge(on) { done(($0, $1)) }
+        }
     }
 
     func restore() async -> (Bool, String?) {
-        await withCheckedContinuation { cont in restore { ok, err in cont.resume(returning: (ok, err)) } }
+        await reply(or: (false, L10n.t("error.xpc"))) { proxy, done in
+            proxy.restoreSystemControl { done(($0, $1)) }
+        }
     }
 
     func temps() async -> [TempReading] {
-        await withCheckedContinuation { cont in temps { cont.resume(returning: $0) } }
+        await reply(or: []) { proxy, done in proxy.getThermalSnapshot(reply: done) }
+    }
+
+    private func reply<T>(or fallback: T, timeout: TimeInterval = 5,
+                          _ request: (ThermalHelperProtocol, @escaping (T) -> Void) -> Void) async -> T {
+        await withCheckedContinuation { continuation in
+            let reply = XPCReply(continuation)
+            guard let proxy = connection?.remoteObjectProxyWithErrorHandler({ error in
+                Logger.xpc.error("proxy error: \(error.localizedDescription, privacy: .public)")
+                reply.resume(fallback)
+            }) as? ThermalHelperProtocol else {
+                reply.resume(fallback)
+                return
+            }
+            request(proxy) { reply.resume($0) }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                reply.resume(fallback)
+            }
+        }
+    }
+}
+
+/// XPC may invoke its error handler without invoking the protocol reply. This
+/// gate lets the reply or timeout win while resuming the continuation once.
+final class XPCReply<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+
+    init(_ continuation: CheckedContinuation<T, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(_ value: T) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        lock.unlock()
+        continuation?.resume(returning: value)
     }
 }

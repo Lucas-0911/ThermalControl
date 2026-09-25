@@ -1,8 +1,5 @@
 import SwiftUI
 
-/// Battery + charge-limit panel. Phase 5: compact/detail merged into one
-/// layout with conditional sections (previously two near-duplicate blocks
-/// with copy-pasted charge rows), restyled to the native palette.
 struct BatteryPanel: View {
     @EnvironmentObject var vm: ThermalViewModel
     @EnvironmentObject var battery: BatteryViewModel
@@ -32,7 +29,36 @@ struct BatteryPanel: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(battery.maintainActive ? TCTheme.quiet : TCTheme.secondaryLabel)
                 }
-                chargePills
+
+                // Native macOS Segmented Control style for charge mode
+                HStack(spacing: 0) {
+                    ChoicePill(
+                        title: L10n.t("battery.full"),
+                        symbol: "battery.100",
+                        selected: battery.chargeMode == .full,
+                        tint: TCTheme.battery,
+                        enabled: true
+                    ) {
+                        battery.setChargeFull()
+                    }
+                    Divider().frame(height: 16)
+                    ChoicePill(
+                        title: L10n.t("mode.custom"),
+                        symbol: "percent",
+                        selected: battery.chargeMode == .custom,
+                        tint: TCTheme.quiet,
+                        enabled: true
+                    ) {
+                        battery.setChargeCustom()
+                    }
+                }
+                .padding(2)
+                .background(Color(nsColor: .controlColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
+                )
+
                 if battery.chargeMode == .custom {
                     chargeRows
                 }
@@ -66,19 +92,8 @@ struct BatteryPanel: View {
         }
     }
 
-    private var chargePills: some View {
-        HStack(spacing: DS.Space.s) {
-            ChoicePill(title: L10n.t("battery.full"), symbol: "battery.100", selected: battery.chargeMode == .full, tint: TCTheme.battery, enabled: true) {
-                battery.setChargeFull()
-            }
-            ChoicePill(title: L10n.t("mode.custom"), symbol: "percent", selected: battery.chargeMode == .custom, tint: TCTheme.quiet, enabled: true) {
-                battery.setChargeCustom()
-            }
-        }
-    }
-
     private var chargeRows: some View {
-        VStack(alignment: .leading, spacing: compact ? DS.Space.s + 2 : DS.Space.m) {
+        VStack(alignment: .leading, spacing: compact ? DS.Space.s : DS.Space.m) {
             ConfigNumberRow(
                 title: L10n.t("battery.min"),
                 unit: "%",

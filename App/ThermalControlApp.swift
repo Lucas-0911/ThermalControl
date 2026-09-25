@@ -58,7 +58,10 @@ struct ThermalControlApp: App {
                 .environment(\.locale, lang.locale)
                 .id(lang.selection)
         } label: {
-            Label(vm.menuTitle, systemImage: vm.menuSymbol)
+            HStack(spacing: 4) {
+                Image(systemName: vm.menuSymbol)
+                Text(vm.menuTitle)
+            }
         }
         .menuBarExtraStyle(.window)
     }

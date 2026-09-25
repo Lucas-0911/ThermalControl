@@ -3,13 +3,14 @@ import Foundation
 /// Charge-window clamping, extracted from `BatteryViewModel`/`ThermalViewModel`
 /// so the bounds contract is one place and unit-testable.
 ///
-/// Contract (unchanged behavior):
-///   - upper clamps to `[20, 99]`
-///   - lower clamps to `[20, upper-2]` (never within 2 of the upper bound)
+/// Contract:
+///   - upper clamps to `[40, 99]`
+///   - lower clamps to `[20, upper-5]`
 struct ChargeLimits: Equatable {
     static let minPercent = 20
+    static let minUpper = 40
     static let maxPercent = 99
-    static let minGap = 2
+    static let minGap = 5
 
     let upper: Int
     let lower: Int
@@ -23,7 +24,7 @@ struct ChargeLimits: Equatable {
     /// Upper-bound-only clamp, used by input bindings before the full
     /// (upper, lower) pair is known.
     static func clampUpper(_ value: Int) -> Int {
-        min(maxPercent, max(minPercent, value))
+        min(maxPercent, max(minUpper, value))
     }
 
     /// Defaults seen in the UI for a fresh install.

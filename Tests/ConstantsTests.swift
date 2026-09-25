@@ -19,8 +19,11 @@ final class ConstantsTests: XCTestCase {
 
     func testTimingConstants() {
         XCTAssertEqual(TC.heartbeatInterval, 5)
-        XCTAssertEqual(TC.heartbeatTimeout, 45)
+        XCTAssertEqual(TC.heartbeatTimeout, 15)
         XCTAssertEqual(TC.uiPollInterval, 3)
+        XCTAssertEqual(TC.backgroundPollInterval, 15)
+        XCTAssertEqual(TC.menuPollInterval, 2.5)
+        XCTAssertEqual(TC.dashboardPollInterval, 2)
         XCTAssertEqual(TC.batteryTickInterval, 2)
     }
 

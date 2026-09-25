@@ -13,6 +13,7 @@ final class PowerObserver {
     private var root: io_connect_t = 0
     private var notifier: io_object_t = 0
     private var port: IONotificationPortRef?
+    var onSleep: (() -> Void)?
     var onWake: (() -> Void)?
 
     func start() {
@@ -23,10 +24,11 @@ final class PowerObserver {
             guard let ref else { return }
             let me = Unmanaged<PowerObserver>.fromOpaque(ref).takeUnretainedValue()
             switch messageType {
-            case PowerMessage.canSystemSleep, PowerMessage.systemWillSleep:
-                if let arg {
-                    IOAllowPowerChange(me.root, Int(bitPattern: arg))
-                }
+            case PowerMessage.canSystemSleep:
+                if let arg { IOAllowPowerChange(me.root, Int(bitPattern: arg)) }
+            case PowerMessage.systemWillSleep:
+                me.onSleep?()
+                if let arg { IOAllowPowerChange(me.root, Int(bitPattern: arg)) }
             case PowerMessage.systemHasPoweredOn:
                 me.onWake?()
             default:

@@ -40,7 +40,11 @@ struct DashboardView: View {
         }
         .frame(minWidth: 820, minHeight: 600)
         .background(TCTheme.windowBackground)
-        .onAppear { vm.start() }
+        .onAppear {
+            vm.start()
+            vm.setDashboardVisible(true)
+        }
+        .onDisappear { vm.setDashboardVisible(false) }
     }
 
     private var toolbar: some View {

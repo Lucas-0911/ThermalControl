@@ -73,6 +73,14 @@ final class FanViewModel: ObservableObject {
 
     // MARK: - Commands
 
+    func cancelPendingCommands() {
+        fanApplyTask?.cancel()
+        fanApplyTask = nil
+        fanSeq += 1
+        applyingNamedFanMode = false
+        editingFan = false
+    }
+
     func setFanMode(_ mode: FanMode) {
         if mode == .manual {
             selectFanCustom()

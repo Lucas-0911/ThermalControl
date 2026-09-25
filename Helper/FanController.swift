@@ -3,10 +3,11 @@ import os
 
 final class FanController {
     private let smc: any SMCProtocol
+    private let commandLock = NSLock()
     private let lock = NSLock()
     private var policyStore: FanPolicy = .system
     private(set) var lastError: String?
-    private(set) var ftstPresent = false
+    private var ftstPresentStore = false
     private var modeKeys: [Int: String] = [:]
     private var fanCount = 0
     private var ftstKey: String?
@@ -19,10 +20,22 @@ final class FanController {
         return policyStore
     }
 
-    var canControl: Bool { fanCount > 0 && !modeKeys.isEmpty }
-    var count: Int { fanCount }
+    var ftstPresent: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return ftstPresentStore
+    }
+
+    var canControl: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return fanCount > 0 && !modeKeys.isEmpty
+    }
+    var count: Int {
+        lock.lock(); defer { lock.unlock() }
+        return fanCount
+    }
 
     func probe() {
+        commandLock.lock(); defer { commandLock.unlock() }
         lock.lock(); defer { lock.unlock() }
         fanCount = Int((try? smc.readUInt8(SMCKey.fanCount.rawValue)) ?? 0)
         if smc.keyExists(SMCKey.ftstLower.rawValue) {
@@ -32,7 +45,7 @@ final class FanController {
         } else {
             ftstKey = nil
         }
-        ftstPresent = ftstKey != nil
+        ftstPresentStore = ftstKey != nil
         modeKeys.removeAll()
         for i in 0..<fanCount {
             if smc.keyExists(SMCKey.fanMode(i).rawValue) { modeKeys[i] = SMCKey.fanMode(i).rawValue }
@@ -46,6 +59,7 @@ final class FanController {
     }
 
     func setMode(_ mode: FanMode) -> (Bool, String?) {
+        commandLock.lock(); defer { commandLock.unlock() }
         lock.lock(); defer { lock.unlock() }
         switch mode {
         case .system: return restoreSystemUnlocked()
@@ -56,6 +70,7 @@ final class FanController {
     }
 
     func setManual(rpm: Int, index: Int) -> (Bool, String?) {
+        commandLock.lock(); defer { commandLock.unlock() }
         lock.lock(); defer { lock.unlock() }
         var targets: [Int: Int] = [:]
         if case .manual(let existing) = policyStore {
@@ -77,12 +92,14 @@ final class FanController {
 
     @discardableResult
     func restoreSystem() -> (Bool, String?) {
+        commandLock.lock(); defer { commandLock.unlock() }
         lock.lock(); defer { lock.unlock() }
         return restoreSystemUnlocked()
     }
 
     @discardableResult
     func apply() -> (Bool, String?) {
+        commandLock.lock(); defer { commandLock.unlock() }
         lock.lock(); defer { lock.unlock() }
         return applyUnlocked()
     }
@@ -100,7 +117,7 @@ final class FanController {
         case .max: mode = FanMode.max.rawValue
         case .manual: mode = FanMode.manual.rawValue
         }
-        return FanStatus(fans: ch, desiredMode: mode, ftstPresent: ftstPresent, lastError: lastError)
+        return FanStatus(fans: ch, desiredMode: mode, ftstPresent: ftstPresentStore, lastError: lastError)
     }
 
     private func restoreSystemUnlocked() -> (Bool, String?) {

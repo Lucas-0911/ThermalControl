@@ -28,7 +28,17 @@ final class HelperXPCService: NSObject, ThermalHelperProtocol {
             try smc.open()
             fan.probe()
             battery.probe()
-            Task { await watchdog.start() }
+            Task { [weak self] in
+                guard let self else { return }
+                await watchdog.setSafetyFallback { [weak self] in self?.persist() }
+                await watchdog.start()
+            }
+            power.onSleep = { [weak self] in
+                guard let self else { return }
+                _ = self.fan.restoreSystem()
+                self.battery.disableForceDischarge()
+                Task { await self.watchdog.onSleep() }
+            }
             power.onWake = { [weak self] in
                 guard let self else { return }
                 Task { await self.watchdog.onWake() }
@@ -67,22 +77,22 @@ final class HelperXPCService: NSObject, ThermalHelperProtocol {
             chargingEnabled: bat.chargingEnabled,
             forceDischarge: bat.forceDischarge,
             persistEnabled: true
-        ))
+        ).safeForPersistence)
     }
 
     private func restorePersisted() {
+        // Boot always starts from hardware-safe transient baselines, even with
+        // no state file. The app must explicitly send any forced override.
+        _ = fan.restoreSystem()
+        _ = battery.setForceDischarge(false)
         guard let s = StateStore.load(), s.persistEnabled else { return }
-        if let mode = FanMode(rawValue: s.fanMode) {
-            if mode == .manual { _ = fan.setManual(rpm: s.manualRPM, index: -1) }
-            else { _ = fan.setMode(mode) }
-        }
-        _ = battery.setForceDischarge(s.forceDischarge)
         if s.maintain {
             _ = battery.setLimit(upper: s.upper, lower: s.lower)
         } else {
             _ = battery.setChargingEnabled(s.chargingEnabled)
         }
-        Logger.state.info("restored persisted policy")
+        persist() // sanitize legacy state that may contain transient overrides
+        Logger.state.info("restored persisted charge policy with safe fan baseline")
     }
 
     // MARK: - ThermalHelperProtocol

@@ -25,6 +25,17 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
     private var started = false
     private var askedHelperUpgrade = false
     private var askedHelperPermission = false
+    private var heartbeatTimer: Timer?
+    private var telemetryTimer: Timer?
+    private var powerTimer: Timer?
+    private var refreshTask: Task<Void, Never>?
+    private var refreshSeq = 0
+    private var wakeTask: Task<Void, Never>?
+    private var burstTask: Task<Void, Never>?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var menuVisible = false
+    private var dashboardVisible = false
+    private var sleeping = false
 
     init() {
         fan = FanViewModel(xpc: xpc)
@@ -65,15 +76,102 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
             HelperInstallService.registerDaemon(retrigger: false)
         }
         reconnect()
-        Timer.scheduledTimer(withTimeInterval: TC.heartbeatInterval, repeats: true) { [weak self] _ in
+        observeWorkspaceLifecycle()
+        resumePolling()
+    }
+
+    func setMenuVisible(_ visible: Bool) {
+        menuVisible = visible
+        pollingModeDidChange()
+    }
+
+    func setDashboardVisible(_ visible: Bool) {
+        dashboardVisible = visible
+        pollingModeDidChange()
+    }
+
+    private var telemetryInterval: TimeInterval {
+        if dashboardVisible { return TC.dashboardPollInterval }
+        if menuVisible { return TC.menuPollInterval }
+        return TC.backgroundPollInterval
+    }
+
+    private func pollingModeDidChange() {
+        guard started, !sleeping else { return }
+        scheduleTelemetryTimer()
+        schedulePowerTimer()
+        if menuVisible || dashboardVisible { refresh() }
+    }
+
+    private func resumePolling() {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: TC.heartbeatInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.beat() }
         }
-        Timer.scheduledTimer(withTimeInterval: TC.uiPollInterval, repeats: true) { [weak self] _ in
+        scheduleTelemetryTimer()
+        schedulePowerTimer()
+    }
+
+    private func scheduleTelemetryTimer() {
+        telemetryTimer?.invalidate()
+        telemetryTimer = Timer.scheduledTimer(withTimeInterval: telemetryInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+    }
+
+    private func schedulePowerTimer() {
+        powerTimer?.invalidate()
+        powerTimer = nil
+        guard dashboardVisible else { return }
         samplePowerHistory()
-        Timer.scheduledTimer(withTimeInterval: TC.powerSampleInterval, repeats: true) { [weak self] _ in
+        powerTimer = Timer.scheduledTimer(withTimeInterval: TC.powerSampleInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.samplePowerHistory() }
+        }
+    }
+
+    private func suspendPolling() {
+        heartbeatTimer?.invalidate()
+        telemetryTimer?.invalidate()
+        powerTimer?.invalidate()
+        heartbeatTimer = nil
+        telemetryTimer = nil
+        powerTimer = nil
+    }
+
+    private func observeWorkspaceLifecycle() {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers = [
+            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.prepareForSleep() }
+            },
+            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.recoverAfterWake() }
+            }
+        ]
+    }
+
+    private func prepareForSleep() {
+        sleeping = true
+        suspendPolling()
+        refreshTask?.cancel()
+        refreshTask = nil
+        refreshSeq += 1
+        wakeTask?.cancel()
+        burstTask?.cancel()
+        fan.cancelPendingCommands()
+        battery.cancelPendingCommands()
+        connectionState = .disconnected
+    }
+
+    private func recoverAfterWake() {
+        wakeTask?.cancel()
+        wakeTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled else { return }
+            self.xpc.invalidate()
+            self.sleeping = false
+            self.resumePolling()
+            self.reconnect()
         }
     }
 
@@ -94,38 +192,44 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
     }
 
     func refresh() {
+        guard !sleeping, refreshTask == nil else { return }
         smAppServiceState = HelperInstallService.statusText()
         if smAppServiceState == "requiresApproval" && connectionState != .connected {
             connectionState = .needsApproval
             helperStatusText = L10n.t("status.approval")
         }
-        // Four independent XPC round-trips, fired concurrently (matches the
-        // original completion-handler fan-out).
-        Task { @MainActor [weak self] in
-            guard let self, let cap = await self.xpc.capabilities() else { return }
+        refreshSeq += 1
+        let seq = refreshSeq
+        refreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.refreshSeq == seq { self.refreshTask = nil }
+            }
+            async let capabilitiesRequest = self.xpc.capabilities()
+            async let fanStatusRequest = self.xpc.fanStatus()
+            async let batteryStatusRequest = self.xpc.batteryStatus()
+            async let temperaturesRequest = self.xpc.temps()
+            let (cap, fanStatus, batteryStatus, temperatures) = await (
+                capabilitiesRequest, fanStatusRequest, batteryStatusRequest, temperaturesRequest
+            )
+            guard !Task.isCancelled else { return }
+            guard let cap else {
+                self.applyLocalSensors()
+                return
+            }
             self.connectionState = .connected
             self.helperStatusText = L10n.t("status.helper.v", cap.helperVersion)
             self.fan.apply(capabilities: cap)
             self.battery.apply(capabilities: cap)
+            if let fanStatus { self.fan.apply(status: fanStatus) }
+            if let batteryStatus { self.battery.apply(status: batteryStatus) }
+            self.mergeTemps(temperatures)
             self.lastError = nil
             if cap.helperVersion != TC.helperVersion, !self.askedHelperUpgrade {
                 self.askedHelperUpgrade = true
                 HelperInstallService.upgradeEmbeddedHelper()
                 self.reconnect()
             }
-        }
-        Task { @MainActor [weak self] in
-            guard let self, let st = await self.xpc.fanStatus() else { return }
-            self.fan.apply(status: st)
-        }
-        Task { @MainActor [weak self] in
-            guard let self, let st = await self.xpc.batteryStatus() else { return }
-            self.battery.apply(status: st)
-        }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let list = await self.xpc.temps()
-            self.mergeTemps(list)
         }
         battery.applyPowerSensors()
         if connectionState != .connected {
@@ -161,10 +265,13 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
     }
 
     func burstPowerSamples() {
+        guard dashboardVisible else { return }
         samplePowerHistory()
-        Task { @MainActor [weak self] in
+        burstTask?.cancel()
+        burstTask = Task { @MainActor [weak self] in
             for _ in 0..<8 {
                 try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
                 self?.samplePowerHistory()
             }
         }

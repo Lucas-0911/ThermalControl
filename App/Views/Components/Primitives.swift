@@ -1,10 +1,9 @@
 import SwiftUI
 
-// Reusable containers & controls — macOS-native restyle (Phase 5).
-// Surfaces use system control background + separator hairlines instead of
-// per-card colored gradients; tint survives only as a small accent.
+// Reusable containers & controls — macOS HIG Native Redesign
+// Materials, hairlines, continuous corners and system semantics.
 
-/// Neutral surface card for the menu-bar panel.
+/// Control Center style glass card for Menu Bar Popover
 struct MiniCard<Content: View>: View {
     @ViewBuilder var content: () -> Content
 
@@ -12,18 +11,15 @@ struct MiniCard<Content: View>: View {
         content()
             .padding(DS.Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                TCTheme.cardBackground,
-                in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-            )
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                    .strokeBorder(TCTheme.separator, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(TCTheme.separator.opacity(0.4), lineWidth: 0.5)
             )
     }
 }
 
-/// Dashboard section card: tinted icon chip + headline title.
+/// Dashboard section panel card
 struct PanelCard<Content: View>: View {
     let title: String
     var symbol: String
@@ -52,16 +48,16 @@ struct PanelCard<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             TCTheme.cardBackground,
-            in: RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
-                .strokeBorder(TCTheme.separator, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(TCTheme.separator.opacity(0.5), lineWidth: 0.5)
         )
     }
 }
 
-/// Dashboard stat tile: small-caps title, big rounded numeral, footnote.
+/// Stat metric tile
 struct MetricTile: View {
     let title: String
     let value: String
@@ -95,16 +91,16 @@ struct MetricTile: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             TCTheme.cardBackground,
-            in: RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: DS.Radius.card, style: .continuous)
-                .strokeBorder(TCTheme.separator, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(TCTheme.separator.opacity(0.5), lineWidth: 0.5)
         )
     }
 }
 
-/// Selectable fan-mode tile.
+/// Native Segmented-style Mode Tile
 struct ModeTile: View {
     let title: String
     let symbol: String
@@ -118,25 +114,19 @@ struct ModeTile: View {
         Button(action: action) {
             VStack(spacing: compact ? 3 : 5) {
                 Image(systemName: symbol)
-                    .font((compact ? Font.body : Font.title3).weight(.semibold))
+                    .font((compact ? Font.subheadline : Font.title3).weight(.semibold))
                     .symbolRenderingMode(.hierarchical)
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.medium))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, compact ? DS.Space.s : DS.Space.m)
-            .foregroundStyle(selected ? Color.white : tint)
+            .padding(.vertical, compact ? 7 : DS.Space.m)
+            .foregroundStyle(selected ? Color.white : TCTheme.label)
             .background(
-                RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
-                    .fill(selected ? AnyShapeStyle(tint) : AnyShapeStyle(TCTheme.controlFill))
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(selected ? AnyShapeStyle(tint) : AnyShapeStyle(Color.clear))
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
-                    .strokeBorder(
-                        selected ? Color.clear : TCTheme.separator.opacity(0.6),
-                        lineWidth: 1
-                    )
-            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -144,7 +134,7 @@ struct ModeTile: View {
     }
 }
 
-/// Selectable capsule (charge mode).
+/// Native capsule choice button
 struct ChoicePill: View {
     let title: String
     let symbol: String
@@ -159,18 +149,14 @@ struct ChoicePill: View {
                 Image(systemName: symbol)
                     .font(.caption.weight(.semibold))
                 Text(title)
-                    .font(.caption.weight(.semibold))
+                    .font(.caption.weight(.medium))
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, DS.Space.s)
-            .foregroundStyle(selected ? Color.white : tint)
+            .padding(.vertical, 6)
+            .foregroundStyle(selected ? Color.white : TCTheme.label)
             .background(
                 Capsule(style: .continuous)
-                    .fill(selected ? AnyShapeStyle(tint) : AnyShapeStyle(TCTheme.controlFill))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(selected ? Color.clear : TCTheme.separator.opacity(0.6), lineWidth: 1)
+                    .fill(selected ? AnyShapeStyle(tint) : AnyShapeStyle(Color.clear))
             )
         }
         .buttonStyle(.plain)
@@ -179,26 +165,26 @@ struct ChoicePill: View {
     }
 }
 
-/// Helper connection indicator.
+/// Helper connection indicator (native badge)
 struct ConnectionDot: View {
     let connected: Bool
 
     var body: some View {
-        HStack(spacing: DS.Space.xs + 2) {
+        HStack(spacing: 5) {
             Circle()
                 .fill(connected ? TCTheme.battery : TCTheme.power)
                 .frame(width: 7, height: 7)
             Text(connected ? L10n.t("online") : L10n.t("offline"))
-                .font(.caption.weight(.medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(TCTheme.secondaryLabel)
         }
-        .padding(.horizontal, DS.Space.s + 2)
-        .padding(.vertical, DS.Space.xs)
-        .background(.regularMaterial, in: Capsule())
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Color(nsColor: .controlColor), in: Capsule())
     }
 }
 
-/// Labeled numeric input row (RPM / charge %).
+/// Native number row input
 struct ConfigNumberRow: View {
     let title: String
     var unit: String = ""
@@ -209,30 +195,30 @@ struct ConfigNumberRow: View {
     var onLive: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: DS.Space.s + 2) {
+        HStack(spacing: DS.Space.s) {
             Text(title)
                 .font(.callout)
-                .foregroundStyle(TCTheme.secondaryLabel)
+                .foregroundStyle(TCTheme.label)
             Spacer()
             SoftNumberField(
                 value: $value,
-                width: 76,
+                width: 68,
                 enabled: enabled,
                 onCommit: onCommit,
                 onLive: onLive
             )
             if !unit.isEmpty {
                 Text(unit)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(TCTheme.tertiaryLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(TCTheme.secondaryLabel)
                     .frame(width: 32, alignment: .leading)
             }
         }
         .padding(.horizontal, DS.Space.m)
-        .padding(.vertical, DS.Space.s)
+        .padding(.vertical, 6)
         .background(
-            TCTheme.controlFill,
-            in: RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+            Color(nsColor: .controlColor).opacity(0.7),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
     }
 }

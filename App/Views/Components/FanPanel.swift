@@ -29,20 +29,30 @@ struct FanPanel: View {
                     }
                 }
 
-                HStack(spacing: 8) {
+                // Native macOS Segmented Control style
+                HStack(spacing: 0) {
                     ModeTile(title: L10n.t("mode.auto"), symbol: "switch.2", selected: fan.desiredFanMode == .system, tint: TCTheme.accent, enabled: true, compact: compact) {
                         fan.setFanMode(.system)
                     }
+                    Divider().frame(height: 18)
                     ModeTile(title: L10n.t("mode.quiet"), symbol: "moon.stars.fill", selected: fan.desiredFanMode == .quiet, tint: TCTheme.quiet, enabled: true, compact: compact) {
                         fan.setFanMode(.quiet)
                     }
+                    Divider().frame(height: 18)
                     ModeTile(title: L10n.t("mode.max"), symbol: "bolt.fill", selected: fan.desiredFanMode == .max, tint: TCTheme.danger, enabled: true, compact: compact) {
                         fan.setFanMode(.max)
                     }
+                    Divider().frame(height: 18)
                     ModeTile(title: L10n.t("mode.custom"), symbol: "keyboard", selected: fan.desiredFanMode == .manual, tint: TCTheme.power, enabled: true, compact: compact) {
                         fan.selectFanCustom()
                     }
                 }
+                .padding(2)
+                .background(Color(nsColor: .controlColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
+                )
 
                 if fan.desiredFanMode == .manual {
                     if compact {

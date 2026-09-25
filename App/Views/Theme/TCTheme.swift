@@ -1,54 +1,40 @@
 import SwiftUI
 
-/// Semantic palette for the macOS-native redesign (Phase 5).
-///
-/// All colors are dynamic `NSColor` system colors: they adapt automatically
-/// to light/dark appearance and to the user's accent-color preference, which
-/// is what makes the app feel native instead of "custom-skinned".
+/// Semantic palette for the macOS-native redesign (Phase 5 & HIG overhaul).
+/// Strictly dynamic system colors adapting to Light/Dark Mode & system accent.
 enum TCTheme {
     // MARK: - Semantic accents
 
-    /// Fan section / cool temps.
     static let fan = Color(nsColor: .systemBlue)
-    /// Battery section / charging.
     static let battery = Color(nsColor: .systemGreen)
-    /// Temperature section / warm.
     static let temperature = Color(nsColor: .systemOrange)
-    /// Power / wattage / Custom fan mode.
     static let power = Color(nsColor: .systemYellow)
-    /// Quiet mode.
     static let quiet = Color(nsColor: .systemPurple)
-    /// Max mode / force discharge / hot temps.
     static let danger = Color(nsColor: .systemRed)
-    /// Charge lower bound / teal accents.
     static let charge = Color(nsColor: .systemTeal)
-    /// Auto mode — follows the user's system accent.
     static let accent = Color(nsColor: .controlAccentColor)
 
-    // MARK: - Surfaces & labels
+    // MARK: - Surfaces & Labels (Native macOS)
 
     static let cardBackground = Color(nsColor: .controlBackgroundColor)
     static let windowBackground = Color(nsColor: .windowBackgroundColor)
     static let label = Color(nsColor: .labelColor)
     static let secondaryLabel = Color(nsColor: .secondaryLabelColor)
     static let tertiaryLabel = Color(nsColor: .tertiaryLabelColor)
+    static let quaternaryLabel = Color(nsColor: .quaternaryLabelColor)
     static let separator = Color(nsColor: .separatorColor)
 
-    /// Neutral control fill (unselected tiles/pills, tracks).
-    static let controlFill = Color.primary.opacity(0.05)
-    /// Slightly stronger neutral fill (input fields).
-    static let fieldFill = Color.primary.opacity(0.07)
+    /// Native control fill
+    static let controlFill = Color(nsColor: .controlColor)
+    static let fieldFill = Color(nsColor: .textBackgroundColor)
 
     // MARK: - Functional heat ramp
 
-    /// Cool green → amber → hot red. Functional color scale for the fan
-    /// gauge: encodes "how hard is the fan working", kept from the original
-    /// design but re-tuned to sit well on both light and dark backgrounds.
     static let fanHeatStops: [(Double, Color)] = [
-        (0.00, Color(red: 0.20, green: 0.78, blue: 0.35)),
-        (0.45, Color(red: 0.98, green: 0.82, blue: 0.20)),
-        (0.72, Color(red: 0.99, green: 0.55, blue: 0.13)),
-        (1.00, Color(red: 0.90, green: 0.22, blue: 0.18)),
+        (0.00, Color(nsColor: .systemGreen)),
+        (0.45, Color(nsColor: .systemYellow)),
+        (0.72, Color(nsColor: .systemOrange)),
+        (1.00, Color(nsColor: .systemRed)),
     ]
 
     static func fanTint(progress: Double) -> Color {
@@ -76,7 +62,6 @@ enum TCTheme {
         )
     }
 
-    /// Temperature bar color: cool → warm → hot.
     static func tempTint(_ c: Double) -> Color {
         if c >= 95 { return danger }
         if c >= 80 { return temperature }

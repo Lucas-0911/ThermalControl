@@ -84,7 +84,7 @@ final class BatteryViewModel: ObservableObject {
         chargeUpper = AppSettings.chargeUpper ?? chargeUpper
         chargeLower = AppSettings.chargeLower ?? chargeLower
         let savedStop = AppSettings.savedChargeUpper
-        savedChargeUpper = savedStop >= 20 ? savedStop : chargeUpper
+        savedChargeUpper = savedStop >= ChargeLimits.minUpper ? savedStop : chargeUpper
         if AppSettings.chargeMode == ChargeUIMode.custom.rawValue {
             chargeMode = .custom
         }
@@ -105,12 +105,10 @@ final class BatteryViewModel: ObservableObject {
         externalAC = st.externalAC
         if !editingCharge && !applyingCharge {
             forceDischarge = st.forceDischarge
-            if chargeMode == .full {
-                maintainActive = false
-                chargingEnabled = true
-            } else {
-                maintainActive = true
-                if st.upperLimit >= 20, st.upperLimit < 100 {
+            maintainActive = st.maintainActive
+            chargingEnabled = st.chargingEnabled
+            if chargeMode == .custom {
+                if st.upperLimit >= ChargeLimits.minUpper, st.upperLimit < 100 {
                     chargeUpper = st.upperLimit
                     savedChargeUpper = st.upperLimit
                 }
@@ -162,6 +160,14 @@ final class BatteryViewModel: ObservableObject {
     }
 
     // MARK: - Commands
+
+    func cancelPendingCommands() {
+        chargeApplyTask?.cancel()
+        chargeApplyTask = nil
+        chargeSeq += 1
+        applyingCharge = false
+        editingCharge = false
+    }
 
     func setChargeFull() {
         chargeApplyTask?.cancel()

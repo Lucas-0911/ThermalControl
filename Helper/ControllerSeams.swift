@@ -1,4 +1,7 @@
 import Foundation
+#if TESTING
+@testable import ThermalControl
+#endif
 
 /// Controller seams so `HelperXPCService` (Phase 3) can be exercised with
 /// fakes — the real controllers need hardware + FTST/charge-gate timing.
@@ -24,9 +27,12 @@ protocol BatteryControlling {
     func setLimit(upper: Int, lower: Int) -> (Bool, String?)
     func setChargingEnabled(_ enabled: Bool) -> (Bool, String?)
     func setForceDischarge(_ enabled: Bool) -> (Bool, String?)
+    func disableForceDischarge()
     func restoreDefaultCharge()
     func tick()
 }
 
+#if !TESTING
 extension FanController: FanControlling {}
 extension BatteryController: BatteryControlling {}
+#endif

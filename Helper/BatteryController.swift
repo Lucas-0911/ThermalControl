@@ -3,7 +3,8 @@ import IOKit.ps
 
 final class BatteryController {
     private let smc: any SMCProtocol
-    private(set) var family: BatteryFamily = .none
+    private let lock = NSRecursiveLock()
+    private var familyStore: BatteryFamily = .none
     private(set) var upper = 80
     private(set) var lower = 70
     private(set) var chargingEnabled = true
@@ -21,23 +22,33 @@ final class BatteryController {
 
     init(smc: any SMCProtocol) { self.smc = smc }
 
+    var family: BatteryFamily {
+        lock.lock(); defer { lock.unlock() }
+        return familyStore
+    }
+
     func probe() {
+        lock.lock(); defer { lock.unlock() }
         hasCHTE = smc.keyExists(SMCKey.chTE.rawValue)
         hasCHIE = smc.keyExists(SMCKey.chIE.rawValue)
         hasCH0B = smc.keyExists(SMCKey.ch0B.rawValue)
         hasCH0C = smc.keyExists(SMCKey.ch0C.rawValue)
-        if hasCHTE || hasCHIE { family = .tahoe }
-        else if hasCH0B || hasCH0C { family = .legacy }
-        else { family = .none }
+        if hasCHTE || hasCHIE { familyStore = .tahoe }
+        else if hasCH0B || hasCH0C { familyStore = .legacy }
+        else { familyStore = .none }
         if let inf = try? smc.info(SMCKey.chTE.rawValue) {
             chteSize = max(1, inf.dataSize)
             chteIsU8 = inf.type == .ui8 || inf.dataSize <= 1
         }
     }
 
-    var canControl: Bool { family != .none }
+    var canControl: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return familyStore != .none
+    }
 
     func status() -> BatteryStatus {
+        lock.lock(); defer { lock.unlock() }
         let io = readIOKit()
         let amps = (try? smc.readDouble(SMCKey.b0AC.rawValue)) ?? 0
         let volts = (try? smc.readDouble(SMCKey.b0AV.rawValue)) ?? 0
@@ -46,24 +57,28 @@ final class BatteryController {
             amperageMA: amps, voltageMV: volts,
             upperLimit: upper, lowerLimit: lower,
             chargingEnabled: chargingEnabled, maintainActive: maintainActive,
-            forceDischarge: forceDischarge, keyFamily: family.rawValue, lastError: lastError
+            forceDischarge: forceDischarge, keyFamily: familyStore.rawValue, lastError: lastError
         )
     }
 
     func suppressTick(seconds: TimeInterval = 1.2) {
+        lock.lock(); defer { lock.unlock() }
         suppressTickUntil = Date().addingTimeInterval(seconds)
     }
 
     func setLimit(upper: Int, lower: Int) -> (Bool, String?) {
+        lock.lock(); defer { lock.unlock() }
         guard canControl else { return (false, "Máy không có key sạc") }
         suppressTick(seconds: 1.2)
-        self.upper = min(99, max(20, upper))
-        self.lower = min(self.upper - 2, max(20, lower))
+        let limits = ChargeLimits(upper: upper, lower: lower)
+        self.upper = limits.upper
+        self.lower = limits.lower
         maintainActive = true
         return applyImmediate(percent: status().percent)
     }
 
     func setChargingEnabled(_ enabled: Bool) -> (Bool, String?) {
+        lock.lock(); defer { lock.unlock() }
         suppressTick(seconds: 1.2)
         maintainActive = false
         chargingEnabled = enabled
@@ -75,9 +90,10 @@ final class BatteryController {
     }
 
     func setForceDischarge(_ enabled: Bool) -> (Bool, String?) {
+        lock.lock(); defer { lock.unlock() }
         forceDischarge = enabled
         do {
-            switch family {
+            switch familyStore {
             case .legacy:
                 if smc.keyExists(SMCKey.ch0I.rawValue) { try smc.writeUInt8(SMCKey.ch0I.rawValue, enabled ? 1 : 0, verify: false) }
             case .tahoe:
@@ -93,13 +109,21 @@ final class BatteryController {
         }
     }
 
+    func disableForceDischarge() {
+        lock.lock(); defer { lock.unlock() }
+        guard forceDischarge else { return }
+        _ = setForceDischarge(false)
+    }
+
     func tick() {
+        lock.lock(); defer { lock.unlock() }
         guard Date() >= suppressTickUntil else { return }
         if maintainActive { _ = apply(percent: status().percent) }
         if forceDischarge { _ = setForceDischarge(true) }
     }
 
     func restoreDefaultCharge() {
+        lock.lock(); defer { lock.unlock() }
         maintainActive = false
         forceDischarge = false
         _ = setForceDischarge(false)
@@ -168,7 +192,7 @@ final class BatteryController {
                 wrote = true
             }
             if !wrote {
-                if family == .none { return (false, "Không có battery control") }
+                if familyStore == .none { return (false, "Không có battery control") }
                 if hasCHIE, !enabled {
                     try smc.writeUInt8(SMCKey.chIE.rawValue, 1, verify: false)
                     wrote = true

@@ -39,6 +39,13 @@ struct PersistedState: Codable, Equatable {
         self.persistEnabled = persistEnabled
     }
 
+    /// Transient hardware overrides must never survive a helper crash/restart.
+    var safeForPersistence: PersistedState {
+        var copy = self
+        copy.forceDischarge = false
+        return copy
+    }
+
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, fanMode, manualRPM, maintain
         case upper, lower, chargingEnabled, forceDischarge, persistEnabled

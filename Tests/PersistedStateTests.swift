@@ -54,4 +54,11 @@ final class PersistedStateTests: XCTestCase {
         let decoded = try JSONDecoder().decode(PersistedState.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(decoded, s)
     }
+
+    func testTransientForceDischargeIsNeverPersisted() {
+        var state = sample()
+        state.forceDischarge = true
+        XCTAssertFalse(state.safeForPersistence.forceDischarge)
+        XCTAssertEqual(state.safeForPersistence.fanMode, state.fanMode)
+    }
 }
