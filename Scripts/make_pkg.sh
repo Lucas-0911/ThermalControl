@@ -54,9 +54,12 @@ rm -f "$PKGROOT/Applications/$APP_NAME/Contents/MacOS/"*.debug.dylib \
 mkdir -p "$PKGROOT/Applications/$APP_NAME/Contents/Resources"
 cp "$ROOT/Scripts/install_helper.sh" "$PKGROOT/Applications/$APP_NAME/Contents/Resources/install_helper.sh"
 chmod -R 755 "$PKGROOT/Applications/$APP_NAME"
+find "$PKGROOT/Applications/$APP_NAME" -type d -exec chmod 755 {} +
 find "$PKGROOT/Applications/$APP_NAME" -type f -exec chmod 644 {} +
 find "$PKGROOT/Applications/$APP_NAME/Contents/MacOS" -type f -exec chmod 755 {} +
 chmod 755 "$PKGROOT/Applications/$APP_NAME/Contents/Resources/install_helper.sh"
+xattr -cr "$PKGROOT/Applications/$APP_NAME"
+find "$PKGROOT/Applications/$APP_NAME" -name "._*" -delete
 
 cp "$ROOT/Scripts/postinstall" "$SCRIPTS/postinstall"
 chmod 755 "$SCRIPTS/postinstall"

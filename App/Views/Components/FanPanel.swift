@@ -7,9 +7,16 @@ struct FanPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 14) {
             if compact {
-                Label(L10n.t("fan"), systemImage: "fanblades.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(TCTheme.secondaryLabel)
+                HStack(spacing: 6) {
+                    Image(systemName: "fanblades.fill")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(TCTheme.fan)
+                    Text(L10n.t("fan").uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(TCTheme.secondaryLabel)
+                    Spacer()
+                }
             }
             if !fan.showFan {
                 Text(L10n.t("fan.none"))

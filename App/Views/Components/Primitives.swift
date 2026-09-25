@@ -5,17 +5,19 @@ import SwiftUI
 
 /// Control Center style glass card for Menu Bar Popover
 struct MiniCard<Content: View>: View {
+    var padding: CGFloat = 12
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
-            .padding(DS.Space.m)
+            .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(TCTheme.separator.opacity(0.4), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(TCTheme.separator.opacity(0.25), lineWidth: 0.5)
             )
+            .shadow(color: Color.black.opacity(0.04), radius: 3, x: 0, y: 1.5)
     }
 }
 

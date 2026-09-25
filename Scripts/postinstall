@@ -52,6 +52,10 @@ chmod 644 "$DEST_PLIST"
 launchctl bootstrap system "$DEST_PLIST" 2>/dev/null || launchctl load -w "$DEST_PLIST"
 
 # Đảm bảo quyền truy cập toàn hệ thống để Finder/Dock đọc được icon và chạy app
-chmod -R a+rX "$APP"
+find "$APP" -type d -exec chmod 755 {} + 2>/dev/null || true
+find "$APP" -type f -exec chmod 644 {} + 2>/dev/null || true
+find "$APP/Contents/MacOS" -type f -exec chmod 755 {} + 2>/dev/null || true
+chmod 755 "$APP/Contents/Resources/install_helper.sh" 2>/dev/null || true
+xattr -cr "$APP" 2>/dev/null || true
 
 exit 0

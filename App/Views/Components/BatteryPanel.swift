@@ -9,9 +9,16 @@ struct BatteryPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? DS.Space.s + 2 : DS.Space.m) {
             if compact {
-                Label(L10n.t("battery"), systemImage: "battery.100.bolt")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(TCTheme.secondaryLabel)
+                HStack(spacing: 6) {
+                    Image(systemName: "battery.100.bolt")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(TCTheme.battery)
+                    Text(L10n.t("battery").uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(TCTheme.secondaryLabel)
+                    Spacer()
+                }
             }
             if !battery.showBattery {
                 Text(L10n.t("battery.none"))
