@@ -7,63 +7,51 @@ struct DashboardView: View {
     @EnvironmentObject var lang: LanguageSettings
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [
-                    TCTheme.grape.opacity(0.18),
-                    TCTheme.cyan.opacity(0.10),
-                    Color(nsColor: .windowBackgroundColor)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                toolbar
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        metrics
-                        PanelCard(title: L10n.t("fan"), symbol: "fanblades.fill", tint: TCTheme.cyan) {
-                            FanPanel(compact: false)
+        VStack(spacing: 0) {
+            toolbar
+            ScrollView {
+                VStack(alignment: .leading, spacing: DS.Space.l) {
+                    metrics
+                    PanelCard(title: L10n.t("fan"), symbol: "fanblades.fill", tint: TCTheme.fan) {
+                        FanPanel(compact: false)
+                    }
+                    HStack(alignment: .top, spacing: DS.Space.l) {
+                        PanelCard(title: L10n.t("battery"), symbol: "battery.100.bolt", tint: TCTheme.battery) {
+                            BatteryPanel(compact: false)
                         }
-                        HStack(alignment: .top, spacing: 16) {
-                            PanelCard(title: L10n.t("battery"), symbol: "battery.100.bolt", tint: TCTheme.lime) {
-                                BatteryPanel(compact: false)
-                            }
-                            PanelCard(title: L10n.t("temp.hot"), symbol: "thermometer.medium", tint: TCTheme.peach) {
-                                TempPanel(compact: false)
-                            }
-                        }
-                        PanelCard(title: L10n.t("helper"), symbol: "bolt.shield.fill", tint: TCTheme.grape) {
-                            HelperStatusRow(detailed: true)
-                            Text(L10n.t("helper.hint"))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let err = vm.lastError, !err.isEmpty {
-                            Text(err)
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(TCTheme.peach)
+                        PanelCard(title: L10n.t("temp.hot"), symbol: "thermometer.medium", tint: TCTheme.temperature) {
+                            TempPanel(compact: false)
                         }
                     }
-                    .padding(20)
+                    PanelCard(title: L10n.t("helper"), symbol: "bolt.shield.fill", tint: TCTheme.quiet) {
+                        HelperStatusRow(detailed: true)
+                        Text(L10n.t("helper.hint"))
+                            .font(.caption)
+                            .foregroundStyle(TCTheme.secondaryLabel)
+                    }
+                    if let err = vm.lastError, !err.isEmpty {
+                        Text(err)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(TCTheme.danger)
+                    }
                 }
+                .padding(DS.Space.xl)
             }
         }
         .frame(minWidth: 820, minHeight: 600)
+        .background(TCTheme.windowBackground)
         .onAppear { vm.start() }
     }
 
     private var toolbar: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: DS.Space.m) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 Text(L10n.t("app.name"))
-                    .font(.largeTitle.weight(.heavy))
-                    .fontDesign(.rounded)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(TCTheme.label)
                 Text(vm.helperStatusText)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(TCTheme.secondaryLabel)
             }
             Spacer()
             ConnectionDot(connected: vm.connectionState == .connected)
@@ -73,43 +61,46 @@ struct DashboardView: View {
                 Text("Tiếng Việt").tag("vi")
             }
             .pickerStyle(.menu)
-            .frame(width: 150)
+            .labelsHidden()
+            .frame(width: 130)
             Toggle(L10n.t("login.start"), isOn: Binding(
                 get: { vm.startAtLogin },
                 set: { vm.setStartAtLogin($0) }
             ))
             .toggleStyle(.switch)
+            .controlSize(.small)
             Button(L10n.t("reset")) { vm.restoreSystem() }
                 .buttonStyle(.bordered)
                 .disabled(!vm.controlsEnabled)
             Button(L10n.t("reload")) { vm.refresh() }
                 .buttonStyle(.bordered)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, DS.Space.xl)
+        .padding(.vertical, DS.Space.m + 2)
+        .background(.bar)
     }
 
     private var metrics: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: DS.Space.m) {
             MetricTile(
                 title: L10n.t("fan"),
                 value: fanMetric,
                 symbol: "fanblades.fill",
-                tint: TCTheme.cyan,
+                tint: TCTheme.fan,
                 footnote: fan.desiredFanMode == .manual ? L10n.t("mode.custom.rpm", fan.manualRPM) : modeName
             )
             MetricTile(
                 title: L10n.t("battery"),
                 value: battery.showBattery ? "\(battery.batteryPercent)%" : "—",
                 symbol: "battery.100",
-                tint: TCTheme.lime,
+                tint: TCTheme.battery,
                 footnote: battery.showBattery ? battery.chargeStatusLabel : L10n.t("no.battery")
             )
             MetricTile(
                 title: L10n.t("metric.power"),
                 value: powerMetric,
                 symbol: "bolt.fill",
-                tint: TCTheme.sun,
+                tint: TCTheme.power,
                 footnote: battery.externalAC
                     ? (battery.adapterWatts > 0 ? L10n.t("power.adapter", battery.adapterWatts) : L10n.t("power.plugged"))
                     : L10n.t("power.on.battery")
@@ -118,7 +109,7 @@ struct DashboardView: View {
                 title: L10n.t("temp"),
                 value: vm.hottestTemp.map { "\(Int($0.rounded()))°" } ?? "—",
                 symbol: "thermometer.medium",
-                tint: TCTheme.peach,
+                tint: TCTheme.temperature,
                 footnote: L10n.t("temp.sensors", vm.temps.count)
             )
         }

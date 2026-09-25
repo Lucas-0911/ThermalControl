@@ -60,8 +60,6 @@ final class BatteryViewModel: ObservableObject {
         return max(0, inW + drainW - chargeW)
     }
 
-    var chargeIsFull: Bool { chargeMode == .full }
-
     var chargeStatusLabel: String {
         if forceDischarge { return L10n.t("charge.force") }
         if maintainActive { return L10n.t("charge.range", chargeUpper, chargeLower) }
@@ -183,30 +181,6 @@ final class BatteryViewModel: ObservableObject {
             savedChargeUpper = ChargeLimits.clampUpper(percent)
         }
         AppSettings.savedChargeUpper = savedChargeUpper
-        applyChargeLimit()
-    }
-
-    func setChargeStop(_ percent: Int) {
-        let u = ChargeLimits.clampUpper(percent)
-        chargeApplyTask?.cancel()
-        chargeMode = .custom
-        AppSettings.chargeMode = ChargeUIMode.custom.rawValue
-        applyingCharge = true
-        maintainActive = true
-        chargingEnabled = true
-        chargeUpper = u
-        savedChargeUpper = u
-        if chargeLower >= u {
-            chargeLower = max(20, u - 5)
-        }
-        AppSettings.savedChargeUpper = u
-        AppSettings.chargeLower = chargeLower
-        applyChargeLimit()
-    }
-
-    func setChargePreset(lower: Int, upper: Int) {
-        chargeLower = lower
-        chargeUpper = upper
         applyChargeLimit()
     }
 

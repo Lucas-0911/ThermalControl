@@ -8,52 +8,54 @@ struct MenuBarView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: DS.Space.s + 2) {
             header
             HelperStatusRow()
-            MiniCard(tint: TCTheme.cyan) {
+            MiniCard {
                 FanPanel(compact: true)
             }
-            MiniCard(tint: TCTheme.lime) {
+            MiniCard {
                 BatteryPanel(compact: true)
             }
             if let err = vm.lastError, !err.isEmpty {
-                Text(err).font(.caption.weight(.semibold)).foregroundStyle(TCTheme.peach)
+                Text(err)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(TCTheme.danger)
             }
         }
-        .padding(14)
+        .padding(DS.Space.m + 2)
         .frame(width: 360)
         .onAppear { vm.start() }
     }
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: DS.Space.s) {
+            VStack(alignment: .leading, spacing: DS.Space.xxs) {
                 Text(L10n.t("app.name"))
-                    .font(.title2.weight(.heavy))
-                    .fontDesign(.rounded)
+                    .font(.headline)
+                    .foregroundStyle(TCTheme.label)
                 Text(summary)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .font(.caption)
+                    .foregroundStyle(TCTheme.secondaryLabel)
             }
             Spacer()
             ConnectionDot(connected: vm.connectionState == .connected)
-            iconButton("gearshape.fill", tint: TCTheme.grape, help: L10n.t("settings")) {
+            iconButton("gearshape", help: L10n.t("settings")) {
                 openMainWindow()
             }
-            iconButton("xmark", tint: TCTheme.peach, help: L10n.t("quit")) {
+            iconButton("xmark", help: L10n.t("quit")) {
                 vm.quitApp()
             }
         }
     }
 
-    private func iconButton(_ symbol: String, tint: Color, help: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.body.weight(.bold))
-                .foregroundStyle(tint)
-                .frame(width: 28, height: 28)
-                .background(tint.opacity(0.16), in: Circle())
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(TCTheme.secondaryLabel)
+                .frame(width: DS.Icon.button, height: DS.Icon.button)
+                .background(TCTheme.controlFill, in: Circle())
         }
         .buttonStyle(.plain)
         .help(help)

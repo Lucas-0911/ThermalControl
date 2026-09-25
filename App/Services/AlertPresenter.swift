@@ -2,6 +2,7 @@ import AppKit
 
 /// Abstraction the view models depend on for surfacing errors, so no
 /// `NSAlert`/`NSApp` calls remain in the business layer (Phase 4).
+@MainActor
 protocol ErrorPresenting {
     func presentError(_ message: String, title: String?)
 }

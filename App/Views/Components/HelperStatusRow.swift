@@ -10,7 +10,7 @@ struct HelperStatusRow: View {
         if vm.connectionState == .connected && !detailed {
             EmptyView()
         } else {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: DS.Space.s) {
                 if detailed {
                     LabeledContent(L10n.t("helper"), value: vm.helperStatusText)
                     LabeledContent("SMAppService", value: vm.smAppServiceState)
@@ -19,25 +19,24 @@ struct HelperStatusRow: View {
                 } else {
                     Text(vm.helperStatusText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(TCTheme.secondaryLabel)
                 }
                 if vm.connectionState != .connected {
-                    HStack(spacing: 8) {
+                    HStack(spacing: DS.Space.s) {
                         Button(L10n.t("perm.allow")) { vm.showHelperPermissionAlert(force: true) }
-                            .buttonStyle(.plain)
-                            .font(.caption.weight(.bold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .foregroundStyle(.white)
-                            .background(TCTheme.grape, in: Capsule())
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
                             .disabled(vm.connectionState == .connecting)
                         Button(L10n.t("helper.loginItems")) { vm.openLoginItems() }
-                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                         Button(L10n.t("helper.reconnect")) { vm.reconnect() }
-                            .font(.caption.weight(.semibold))
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                     }
                 } else if detailed {
                     Button(L10n.t("helper.reconnect")) { vm.reconnect() }
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
                 }
             }
