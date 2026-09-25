@@ -1,9 +1,7 @@
 # Build artifacts
 .build*/
 .build-release/
-dist/
-*.dmg
-*.pkg
+# dist/ is tracked for public release packages (.pkg & .dmg)
 
 # XcodeGen generates the Xcode project from project.yml
 ThermalControl.xcodeproj/
