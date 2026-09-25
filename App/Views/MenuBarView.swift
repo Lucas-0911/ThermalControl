@@ -8,24 +8,22 @@ struct MenuBarView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             header
             
-            Divider().opacity(0.6)
+            heroGlanceBar
             
             HelperStatusRow()
 
             // Fan Section
-            GroupBox {
+            MiniCard {
                 FanPanel(compact: true)
-                    .padding(.vertical, 2)
             }
 
             // Battery Section
             if battery.showBattery {
-                GroupBox {
+                MiniCard {
                     BatteryPanel(compact: true)
-                        .padding(.vertical, 2)
                 }
             }
 
@@ -36,8 +34,8 @@ struct MenuBarView: View {
                     .padding(.horizontal, 4)
             }
         }
-        .padding(12)
-        .frame(width: 340)
+        .padding(14)
+        .frame(width: 350)
         .onAppear {
             vm.start()
             vm.setMenuVisible(true)
@@ -48,8 +46,8 @@ struct MenuBarView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "fanblades.fill")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(TCTheme.secondaryLabel)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(TCTheme.fan)
             
             VStack(alignment: .leading, spacing: 1) {
                 Text(L10n.t("app.name"))
@@ -74,13 +72,75 @@ struct MenuBarView: View {
         .padding(.horizontal, 2)
     }
 
+    private var heroGlanceBar: some View {
+        HStack(spacing: 8) {
+            // Hot Temp Hero
+            HStack(spacing: 5) {
+                Image(systemName: "thermometer.medium")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(vm.hottestTemp.map { TCTheme.tempTint($0) } ?? TCTheme.charge)
+                Text(vm.hottestTemp.map { "\(Int($0.rounded()))°C" } ?? "—")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(TCTheme.label)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
+            )
+
+            // Fan Hero
+            HStack(spacing: 5) {
+                Image(systemName: "fanblades.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(TCTheme.fan)
+                Text(fan.fans.first.map { "\(Int($0.actualRPM))" } ?? "0")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(TCTheme.label)
+                Text("RPM")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(TCTheme.tertiaryLabel)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
+            )
+
+            // Battery Hero
+            HStack(spacing: 5) {
+                Image(systemName: battery.maintainActive ? "bolt.slash.fill" : "battery.100.bolt")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(battery.maintainActive ? TCTheme.charge : TCTheme.battery)
+                Text(battery.showBattery ? "\(battery.batteryPercent)%" : "—")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(TCTheme.label)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
+            )
+        }
+    }
+
     private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(TCTheme.secondaryLabel)
-                .frame(width: 22, height: 22)
-                .background(Color(nsColor: .controlColor), in: Circle())
+                .frame(width: 24, height: 24)
+                .background(.regularMaterial, in: Circle())
+                .overlay(Circle().strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .help(help)
