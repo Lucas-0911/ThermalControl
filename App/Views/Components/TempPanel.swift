@@ -4,15 +4,10 @@ struct TempPanel: View {
     @EnvironmentObject var vm: ThermalViewModel
     var compact: Bool = true
 
-    /// Hardware-sensor names without localization keys (core labels).
-    /// The localized entries (TC0P/Tg0P/Ts0P/Ts0G) resolve through `L10n`
-    /// in `label(for:)` at render time — previously a static dict captured
-    /// translations at type-init, which only refreshed thanks to the
-    /// `.id(lang.selection)` view-tree rebuild.
     private static let coreNames: [String: String] = [
         "Tp01": "CPU P1",
         "Tp05": "CPU P2",
-        "Tp09": "CPU E",
+        "Tp09": "CPU E1",
         "Tp0D": "CPU P3",
         "Tp0H": "CPU P4",
         "Tp0L": "CPU E2",
@@ -23,8 +18,8 @@ struct TempPanel: View {
         "Tg0D": "GPU 2",
         "Tg0L": "GPU 3",
         "Tg0T": "GPU 4",
-        "Tg0b": "GPU die",
-        "Tg0f": "GPU die 2",
+        "Tg0b": "GPU Die",
+        "Tg0f": "GPU Die 2",
         "Tg1F": "GPU",
         "Te05": "GPU",
         "Te0F": "GPU",
@@ -42,39 +37,59 @@ struct TempPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s + 2) {
+        VStack(alignment: .leading, spacing: compact ? 8 : 12) {
             if compact {
-                Label(L10n.t("temp"), systemImage: "thermometer.medium")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(TCTheme.secondaryLabel)
+                HStack(spacing: 6) {
+                    Image(systemName: "thermometer.medium")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(TCTheme.temperature)
+                    Text(L10n.t("temp").uppercased())
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(TCTheme.secondaryLabel)
+                    Spacer()
+                }
             }
+
             if vm.temps.isEmpty {
-                Text(L10n.t("temp.none"))
-                    .font(.caption)
-                    .foregroundStyle(TCTheme.secondaryLabel)
+                HStack {
+                    Image(systemName: "slash.circle")
+                        .foregroundStyle(TCTheme.secondaryLabel)
+                    Text(L10n.t("temp.none"))
+                        .font(.caption)
+                        .foregroundStyle(TCTheme.secondaryLabel)
+                }
+                .padding(.vertical, 4)
             } else {
                 let list = compact ? Array(vm.temps.prefix(4)) : vm.temps
-                ForEach(list, id: \.key) { t in
-                    HStack(spacing: DS.Space.s + 2) {
-                        Text(label(for: t.key))
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(TCTheme.secondaryLabel)
-                            .frame(width: compact ? 64 : 78, alignment: .leading)
-                            .lineLimit(1)
-                        GeometryReader { geo in
-                            let p = min(max((t.celsius - 20) / 90, 0), 1)
-                            ZStack(alignment: .leading) {
-                                Capsule().fill(TCTheme.controlFill)
-                                Capsule()
-                                    .fill(TCTheme.tempTint(t.celsius))
-                                    .frame(width: max(8, geo.size.width * p))
+                VStack(spacing: 8) {
+                    ForEach(list, id: \.key) { t in
+                        HStack(spacing: DS.Space.s + 2) {
+                            Text(label(for: t.key))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(TCTheme.secondaryLabel)
+                                .frame(width: compact ? 70 : 90, alignment: .leading)
+                                .lineLimit(1)
+
+                            // Subtle heat bar
+                            GeometryReader { geo in
+                                let p = min(max((t.celsius - 25) / 80, 0), 1)
+                                ZStack(alignment: .leading) {
+                                    Capsule()
+                                        .fill(Color(nsColor: .separatorColor).opacity(0.18))
+                                    Capsule()
+                                        .fill(TCTheme.tempTint(t.celsius))
+                                        .frame(width: max(6, geo.size.width * p))
+                                }
                             }
+                            .frame(height: 5)
+
+                            Text("\(Int(t.celsius.rounded()))°C")
+                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .frame(width: 40, alignment: .trailing)
+                                .foregroundStyle(TCTheme.tempTint(t.celsius))
                         }
-                        .frame(height: 6)
-                        Text("\(Int(t.celsius.rounded()))°")
-                            .font(.caption.weight(.semibold).monospacedDigit())
-                            .frame(width: 36, alignment: .trailing)
-                            .foregroundStyle(TCTheme.tempTint(t.celsius))
                     }
                 }
             }

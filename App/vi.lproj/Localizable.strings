@@ -82,3 +82,7 @@
 "language" = "Ngôn ngữ";
 "language.system" = "Theo máy";
 "login.start" = "Mở cùng máy";
+"nav.overview" = "Tổng quan";
+"nav.overview.sub" = "Chỉ số hệ thống & điều khiển nhanh";
+"nav.fans.sub" = "Tuỳ chỉnh chế độ & tốc độ quạt chi tiết";
+"nav.battery.sub" = "Quản lý dòng điện & giới hạn sạc bảo vệ pin";

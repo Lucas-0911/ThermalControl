@@ -82,3 +82,7 @@
 "language" = "Language";
 "language.system" = "System";
 "login.start" = "Open at login";
+"nav.overview" = "Overview";
+"nav.overview.sub" = "Telemetry & Quick Controls";
+"nav.fans.sub" = "Detailed Fan Speeds & Custom Curves";
+"nav.battery.sub" = "Power Management & Battery Limiter";

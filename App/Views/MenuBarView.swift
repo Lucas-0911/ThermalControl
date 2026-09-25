@@ -8,34 +8,46 @@ struct MenuBarView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             header
             
             heroGlanceBar
             
             HelperStatusRow()
 
-            // Fan Section
+            // Fan Section Glass Card
             MiniCard {
                 FanPanel(compact: true)
             }
 
-            // Battery Section
+            // Battery Section Glass Card
             if battery.showBattery {
                 MiniCard {
                     BatteryPanel(compact: true)
                 }
             }
 
+            // Sensors Quick Preview Glass Card
+            MiniCard {
+                TempPanel(compact: true)
+            }
+
             if let err = vm.lastError, !err.isEmpty {
-                Text(err)
-                    .font(.caption)
-                    .foregroundStyle(TCTheme.danger)
-                    .padding(.horizontal, 4)
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.caption)
+                    Text(err)
+                        .font(.caption)
+                }
+                .foregroundStyle(TCTheme.danger)
+                .padding(.horizontal, 4)
             }
         }
-        .padding(14)
+        .padding(12)
         .frame(width: 350)
+        .background(
+            Color(nsColor: .windowBackgroundColor).opacity(0.85)
+        )
         .onAppear {
             vm.start()
             vm.setMenuVisible(true)
@@ -46,15 +58,15 @@ struct MenuBarView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "fanblades.fill")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(TCTheme.fan)
             
             VStack(alignment: .leading, spacing: 1) {
                 Text(L10n.t("app.name"))
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(TCTheme.label)
                 Text(summary)
-                    .font(.system(size: 11))
+                    .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(TCTheme.secondaryLabel)
             }
             
@@ -62,7 +74,7 @@ struct MenuBarView: View {
             
             ConnectionDot(connected: vm.connectionState == .connected)
             
-            iconButton("gearshape", help: L10n.t("settings")) {
+            iconButton("gearshape.fill", help: L10n.t("settings")) {
                 openMainWindow()
             }
             iconButton("xmark", help: L10n.t("quit")) {
@@ -73,19 +85,19 @@ struct MenuBarView: View {
     }
 
     private var heroGlanceBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             // Hot Temp Hero
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Image(systemName: "thermometer.medium")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(vm.hottestTemp.map { TCTheme.tempTint($0) } ?? TCTheme.charge)
                 Text(vm.hottestTemp.map { "\(Int($0.rounded()))°C" } ?? "—")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(TCTheme.label)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -93,20 +105,20 @@ struct MenuBarView: View {
             )
 
             // Fan Hero
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
                 Image(systemName: "fanblades.fill")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(TCTheme.fan)
                 Text(fan.fans.first.map { "\(Int($0.actualRPM))" } ?? "0")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(TCTheme.label)
                 Text("RPM")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.system(size: 8, weight: .bold))
                     .foregroundStyle(TCTheme.tertiaryLabel)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -114,17 +126,17 @@ struct MenuBarView: View {
             )
 
             // Battery Hero
-            HStack(spacing: 5) {
-                Image(systemName: battery.maintainActive ? "bolt.slash.fill" : "battery.100.bolt")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(battery.maintainActive ? TCTheme.charge : TCTheme.battery)
-                Text(battery.showBattery ? "\(battery.batteryPercent)%" : "—")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
+            HStack(spacing: 4) {
+                Image(systemName: battery.maintainActive ? "shield.lefthalf.filled" : (battery.externalAC ? "powerplug.fill" : "battery.100"))
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(battery.maintainActive ? TCTheme.charge : (battery.batteryPercent <= 20 ? TCTheme.danger : TCTheme.battery))
+                Text(battery.showBattery ? "\(battery.batteryPercent)%" : "AC")
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(TCTheme.label)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -133,36 +145,42 @@ struct MenuBarView: View {
         }
     }
 
-    private func iconButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+    private var summary: String {
+        let fCount = fan.fans.count
+        if fCount > 1 {
+            return "\(fCount) \(L10n.t("fan").lowercased())"
+        }
+        return fan.desiredFanMode == .manual ? L10n.t("mode.custom.rpm", fan.manualRPM) : modeName
+    }
+
+    private var modeName: String {
+        switch fan.desiredFanMode {
+        case .system: return L10n.t("mode.auto")
+        case .quiet:  return L10n.t("mode.quiet")
+        case .max:    return L10n.t("mode.max")
+        case .manual: return L10n.t("mode.custom")
+        }
+    }
+
+    private func iconButton(_ name: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol)
+            Image(systemName: name)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(TCTheme.secondaryLabel)
                 .frame(width: 24, height: 24)
-                .background(.regularMaterial, in: Circle())
-                .overlay(Circle().strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5))
+                .background(Color(nsColor: .controlColor).opacity(0.6), in: Circle())
         }
         .buttonStyle(.plain)
         .help(help)
     }
 
-    private var summary: String {
-        var parts: [String] = []
-        if let t = vm.hottestTemp { parts.append("\(Int(t.rounded()))°") }
-        if let rpm = fan.fans.first?.actualRPM, rpm > 0 { parts.append("\(Int(rpm)) RPM") }
-        if battery.showBattery { parts.append("\(battery.batteryPercent)%") }
-        return parts.isEmpty ? vm.helperStatusText : parts.joined(separator: " · ")
-    }
-
     private func openMainWindow() {
-        dismiss()
-        if let existing = WindowLocator.dashboardWindow() {
-            WindowLocator.bringDashboardForward()
-            _ = existing
-            return
+        WindowLocator.bringDashboardForward()
+        if WindowLocator.dashboardWindow() == nil {
+            openWindow(id: "dashboard")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                WindowLocator.bringDashboardForward()
+            }
         }
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        openWindow(id: "main")
     }
 }
