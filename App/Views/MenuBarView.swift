@@ -15,22 +15,23 @@ struct MenuBarView: View {
             
             HelperStatusRow()
 
-            // Fan Section Glass Card
             MiniCard {
-                FanPanel(compact: true)
+                FanPanel(compact: true, allowsEditing: false)
             }
 
-            // Battery Section Glass Card
             if battery.showBattery {
                 MiniCard {
-                    BatteryPanel(compact: true)
+                    BatteryPanel(compact: true, section: .controls, allowsEditing: false)
                 }
             }
 
-            // Sensors Quick Preview Glass Card
-            MiniCard {
-                TempPanel(compact: true)
+            HStack {
+                Button(L10n.t("nav.overview")) { openMainWindow() }
+                Spacer()
+                Button(L10n.t("quit")) { Task { await vm.quitApp() } }
+                    .keyboardShortcut("q", modifiers: .command)
             }
+            .buttonStyle(.bordered)
 
             if let err = vm.lastError, !err.isEmpty {
                 HStack(spacing: 6) {
@@ -38,6 +39,10 @@ struct MenuBarView: View {
                         .font(.caption)
                     Text(err)
                         .font(.caption)
+                    if vm.failedRestoreComponents != 0 {
+                        Button(L10n.t("retry"), action: vm.retryFailedRestore)
+                            .buttonStyle(.bordered)
+                    }
                 }
                 .foregroundStyle(TCTheme.danger)
                 .padding(.horizontal, 4)
@@ -75,10 +80,8 @@ struct MenuBarView: View {
             ConnectionDot(connected: vm.connectionState == .connected)
             
             iconButton("gearshape.fill", help: L10n.t("settings")) {
+                vm.openSettings()
                 openMainWindow()
-            }
-            iconButton("xmark", help: L10n.t("quit")) {
-                vm.quitApp()
             }
         }
         .padding(.horizontal, 2)
@@ -86,7 +89,6 @@ struct MenuBarView: View {
 
     private var heroGlanceBar: some View {
         HStack(spacing: 6) {
-            // Hot Temp Hero
             HStack(spacing: 4) {
                 Image(systemName: "thermometer.medium")
                     .font(.system(size: 10, weight: .bold))
@@ -104,12 +106,14 @@ struct MenuBarView: View {
                     .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
             )
 
-            // Fan Hero
             HStack(spacing: 4) {
                 Image(systemName: "fanblades.fill")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(TCTheme.fan)
-                Text(fan.fans.first.map { "\(Int($0.actualRPM))" } ?? "0")
+                EasedRPMText(
+                    rpm: fan.fans.first.map { fan.displayRPM(for: $0) } ?? 0,
+                    glideGoal: fan.isRamping ? fan.fans.first.flatMap { fan.goalRPM(for: $0.index) } : nil
+                )
                     .font(.system(size: 12, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(TCTheme.label)
@@ -125,7 +129,6 @@ struct MenuBarView: View {
                     .strokeBorder(TCTheme.separator.opacity(0.3), lineWidth: 0.5)
             )
 
-            // Battery Hero
             HStack(spacing: 4) {
                 Image(systemName: battery.maintainActive ? "shield.lefthalf.filled" : (battery.externalAC ? "powerplug.fill" : "battery.100"))
                     .font(.system(size: 10, weight: .bold))
@@ -169,15 +172,49 @@ struct MenuBarView: View {
                 .foregroundStyle(TCTheme.secondaryLabel)
                 .frame(width: 24, height: 24)
                 .background(Color(nsColor: .controlColor).opacity(0.6), in: Circle())
+                .contentShape(.interaction, Rectangle())
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
+    }
+
+    private struct EasedRPMText: View {
+        let rpm: Double
+        var glideGoal: Double? = nil
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var shown = 0.0
+        @State private var lastTick = Date()
+
+        var body: some View {
+            TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: reduceMotion || rpm <= 0 && shown <= 1 && glideGoal == nil)) { context in
+                Text("\(Int(shown.rounded()))")
+                    .onChange(of: context.date) { _, now in
+                        var dt = now.timeIntervalSince(lastTick)
+                        if dt <= 0 { dt = 1.0 / 60.0 }
+                        if dt > 0.1 { dt = 0.1 }
+                        lastTick = now
+                        if let goal = glideGoal, goal >= 0 {
+                            let delta = goal - shown
+                            let maxStep = 250 * dt
+                            if abs(delta) <= maxStep { shown = goal }
+                            else { shown += maxStep * (delta > 0 ? 1 : -1) }
+                        } else {
+                            shown += (rpm - shown) * (1 - exp(-dt / 0.35))
+                        }
+                    }
+            }
+            .onAppear { shown = rpm }
+            .onChange(of: rpm) { _, new in
+                if reduceMotion { shown = glideGoal ?? new }
+            }
+        }
     }
 
     private func openMainWindow() {
         WindowLocator.bringDashboardForward()
         if WindowLocator.dashboardWindow() == nil {
-            openWindow(id: "dashboard")
+            openWindow(id: AppScene.dashboard)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 WindowLocator.bringDashboardForward()
             }

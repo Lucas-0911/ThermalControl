@@ -1,9 +1,6 @@
 import SwiftUI
 
-// MARK: - Apple HIG Modern Design Primitives (macOS Sonoma / Sequoia 2026 Edition)
-// Materials, continuous corners, hairline borders, rich typography and native depth.
-
-/// Control Center style Vibrancy Glass Card for Menu Bar Popover
+/// Compact material card used in the menu-bar popover.
 struct MiniCard<Content: View>: View {
     var padding: CGFloat = 12
     @ViewBuilder var content: () -> Content
@@ -21,7 +18,7 @@ struct MiniCard<Content: View>: View {
     }
 }
 
-/// Dashboard Section Panel Card
+/// Dashboard section card.
 struct PanelCard<Content: View>: View {
     let title: String
     var symbol: String
@@ -68,7 +65,7 @@ struct PanelCard<Content: View>: View {
     }
 }
 
-/// Modern Big Metric Stat Tile
+/// Fixed-height dashboard metric tile.
 struct MetricTile: View {
     let title: String
     let value: String
@@ -77,7 +74,7 @@ struct MetricTile: View {
     var footnote: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DS.Space.xs + 2) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: DS.Space.xs + 2) {
                 Image(systemName: symbol)
                     .font(.system(size: 11, weight: .semibold))
@@ -87,19 +84,29 @@ struct MetricTile: View {
                     .tracking(0.6)
                     .foregroundStyle(TCTheme.secondaryLabel)
             }
+            .frame(height: 16, alignment: .leading)
+
+            Spacer(minLength: 4)
+
             Text(value)
                 .font(.system(size: DS.Typography.metric, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(TCTheme.label)
-            if let footnote {
-                Text(footnote)
-                    .font(.caption2)
-                    .foregroundStyle(TCTheme.secondaryLabel)
-                    .lineLimit(1)
-            }
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(height: 28, alignment: .leading)
+
+            Spacer(minLength: 4)
+
+            Text(footnote ?? " ")
+                .font(.caption2)
+                .foregroundStyle(TCTheme.secondaryLabel)
+                .lineLimit(1)
+                .opacity(footnote != nil ? 1 : 0)
+                .frame(height: 14, alignment: .leading)
         }
         .padding(DS.Space.m + 2)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .leading)
         .background(
             Color(nsColor: .controlBackgroundColor).opacity(0.75),
             in: RoundedRectangle(cornerRadius: DS.Radius.panel, style: .continuous)
@@ -111,7 +118,7 @@ struct MetricTile: View {
     }
 }
 
-/// Native Segmented Mode Tile with smooth pill background
+/// Selectable mode tile.
 struct ModeTile: View {
     let title: String
     let symbol: String
@@ -141,11 +148,13 @@ struct ModeTile: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
         .opacity(enabled ? 1 : 0.4)
     }
 }
 
-/// Choice Pill for Secondary Segmented Switchers
+/// Compact selectable choice.
 struct ChoicePill: View {
     let title: String
     let symbol: String
@@ -169,14 +178,17 @@ struct ChoicePill: View {
                 Capsule(style: .continuous)
                     .fill(selected ? AnyShapeStyle(tint) : AnyShapeStyle(Color.clear))
             )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
         .opacity(enabled ? 1 : 0.45)
     }
 }
 
-/// Helper connection indicator (subtle glowing dot badge)
+/// Helper connection badge.
 struct ConnectionDot: View {
     let connected: Bool
 
@@ -199,7 +211,7 @@ struct ConnectionDot: View {
     }
 }
 
-/// Modern Stepper & Direct Input Row
+/// Number field with step controls.
 struct ConfigNumberRow: View {
     let title: String
     var unit: String = ""
@@ -226,23 +238,24 @@ struct ConfigNumberRow: View {
                     if next != value {
                         value = next
                         onLive()
-                        onCommit()
                     }
                 }) {
                     Image(systemName: "minus")
                         .font(.system(size: 10, weight: .bold))
-                        .frame(width: 22, height: 22)
+                        .frame(width: 30, height: 28)
                         .background(Color(nsColor: .controlColor), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
+                        .contentShape(.interaction, Rectangle())                }
                 .buttonStyle(.plain)
                 .disabled(!enabled || value <= minVal)
+                .accessibilityLabel(L10n.t("value.decrease", title))
 
                 SoftNumberField(
                     value: $value,
                     width: 62,
                     enabled: enabled,
                     onCommit: onCommit,
-                    onLive: onLive
+                    onLive: onLive,
+                    label: title
                 )
 
                 Button(action: {
@@ -250,16 +263,16 @@ struct ConfigNumberRow: View {
                     if next != value {
                         value = next
                         onLive()
-                        onCommit()
                     }
                 }) {
                     Image(systemName: "plus")
                         .font(.system(size: 10, weight: .bold))
-                        .frame(width: 22, height: 22)
+                        .frame(width: 30, height: 28)
                         .background(Color(nsColor: .controlColor), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
-                }
+                        .contentShape(.interaction, Rectangle())                }
                 .buttonStyle(.plain)
                 .disabled(!enabled || value >= maxVal)
+                .accessibilityLabel(L10n.t("value.increase", title))
             }
 
             if !unit.isEmpty {

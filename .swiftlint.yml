@@ -24,11 +24,18 @@ opt_in_rules:
   - sorted_first_last
   - vertical_whitespace_closing_braces
 
-disabled_rules:
-  # High ceilings while god-objects are being split (Phases 3-5); tighten afterwards.
-  - type_body_length
-  - file_length
-  - function_body_length
+# Keep size limits explicit while lifecycle and hardware controllers remain intentionally cohesive.
+file_length:
+  warning: 500
+  error: 600
+
+type_body_length:
+  warning: 360
+  error: 450
+
+function_body_length:
+  warning: 70
+  error: 100
 
 # --- Severity overrides ---
 force_unwrapping: error

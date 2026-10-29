@@ -2,51 +2,118 @@ import AppKit
 import Foundation
 import SwiftUI
 
-/// Orchestrator (Phase 4): owns the XPC connection lifecycle, timers, helper
-/// installation flow, temps and cross-cutting actions. Fan/charge/power state
-/// moved to `FanViewModel` / `BatteryViewModel` / `PowerViewModel`; alerts
-/// moved to `AlertPresenter`. Views inject each sub-VM as its own
-/// `@EnvironmentObject`.
+struct LocalSensorSnapshot: @unchecked Sendable {
+    let power: SensorReader.PowerInfo
+    let fans: [FanChannel]
+    let temperatures: [TempReading]
+}
+
+typealias LocalSensorLoader = @Sendable (_ includeFallback: Bool) -> LocalSensorSnapshot
+
+private let defaultLocalSensorLoader: LocalSensorLoader = { includeFallback in
+    LocalSensorSnapshot(
+        power: SensorReader.power(),
+        fans: includeFallback ? SensorReader.fans() : [],
+        temperatures: includeFallback ? SensorReader.temps() : []
+    )
+}
+
+/// Owns XPC lifecycle, polling, helper installation, temperature state, and cross-cutting actions.
 @MainActor
 final class ThermalViewModel: ObservableObject, ViewModelHost {
     @Published var connectionState: HelperConnectionState = .disconnected
     @Published var helperStatusText = L10n.t("status.disconnected")
     @Published var smAppServiceState = "notRegistered"
     @Published var lastError: String?
+    @Published var selectedDashboardTab: DashboardTab = .overview
+    @Published private(set) var isQuitting = false
+    @Published private(set) var failedRestoreComponents = 0
     @Published var temps: [TempReading] = []
+    @Published private(set) var temperaturesUnavailable = true
     @Published var startAtLogin = HelperInstallService.startAtLoginEnabled()
 
     let fan: FanViewModel
     let battery: BatteryViewModel
     let power = PowerViewModel()
 
-    private let xpc = XPCClient()
-    private let alerts = AlertPresenter()
+    private let xpc: any ThermalOrchestrationClient
+    private let alerts: AlertPresenter
+    private let loadLocalSensors: LocalSensorLoader
     private var started = false
-    private var askedHelperUpgrade = false
-    private var askedHelperPermission = false
-    private var heartbeatTimer: Timer?
-    private var telemetryTimer: Timer?
-    private var powerTimer: Timer?
-    private var refreshTask: Task<Void, Never>?
+    @Published private(set) var isInstallingHelper = false
+    private struct SessionTasks {
+        var helper: Task<Void, Never>?
+        var restore: Task<Void, Never>?
+        var refresh: Task<Void, Never>?
+        var heartbeat: Task<Void, Never>?
+        var reconnect: Task<Void, Never>?
+        var recovery: Task<Void, Never>?
+        var wake: Task<Void, Never>?
+        var burst: Task<Void, Never>?
+        var localSensor: Task<Void, Never>?
+
+        mutating func cancelAll() {
+            helper?.cancel(); helper = nil
+            restore?.cancel(); restore = nil
+            refresh?.cancel(); refresh = nil
+            heartbeat?.cancel(); heartbeat = nil
+            reconnect?.cancel(); reconnect = nil
+            recovery?.cancel(); recovery = nil
+            wake?.cancel(); wake = nil
+            burst?.cancel(); burst = nil
+            localSensor?.cancel(); localSensor = nil
+        }
+    }
+    private var tasks = SessionTasks()
+    private let session = ThermalSession()
+    private var restoreGeneration = 0
+    private var refreshPending = false
     private var refreshSeq = 0
-    private var wakeTask: Task<Void, Never>?
-    private var burstTask: Task<Void, Never>?
-    private var workspaceObservers: [NSObjectProtocol] = []
-    private var menuVisible = false
-    private var dashboardVisible = false
+    private var reconnectSeq = 0
+    private var localSensorPending = false
+    private var localSensorNeedsFallback = false
+    private var localSensorNeedsPowerSample = false
+    private var localSensorGeneration = 0
+    private var menuVisible: Bool { session.menuVisible }
+    private var dashboardVisible: Bool { session.dashboardVisible }
+    var isMenuVisible: Bool { menuVisible }
+    var isDashboardVisible: Bool { dashboardVisible }
     private var sleeping = false
 
-    init() {
+    convenience init() {
+        self.init(
+            xpc: XPCClient(),
+            alerts: AlertPresenter(),
+            loadLocalSensors: defaultLocalSensorLoader
+        )
+    }
+
+    init(
+        xpc: any ThermalOrchestrationClient,
+        alerts: AlertPresenter,
+        loadLocalSensors: @escaping LocalSensorLoader = defaultLocalSensorLoader
+    ) {
+        self.xpc = xpc
+        self.alerts = alerts
+        self.loadLocalSensors = loadLocalSensors
         fan = FanViewModel(xpc: xpc)
         battery = BatteryViewModel(xpc: xpc)
         fan.host = self
         battery.host = self
+        session.onRefresh = { [weak self] in self?.refresh() }
+        session.onHeartbeat = { [weak self] in self?.beat() }
+        session.onPowerSample = { [weak self] in self?.samplePowerHistory() }
+        session.onSleep = { [weak self] in self?.prepareForSleep() }
+        session.onWake = { [weak self] in self?.recoverAfterWake() }
+        self.xpc.onConnectionLost = { [weak self] in
+            Task { @MainActor in self?.handleConnectionLost() }
+        }
     }
 
     // MARK: - ViewModelHost
 
-    var isConnected: Bool { connectionState == .connected }
+    var isConnecting: Bool { connectionState == .connecting }
+    var isConnected: Bool { connectionState == .connected && !isQuitting }
     var controlsEnabled: Bool { isConnected }
 
     func noteError(_ message: String) { lastError = message }
@@ -60,139 +127,118 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
 
     func batteryChargeDidChange() { burstPowerSamples() }
 
-    // MARK: - Derived
+#if DEBUG
+    var isRefreshInFlightForTesting: Bool { tasks.refresh != nil }
+    var hasPendingRefreshForTesting: Bool { refreshPending }
+    var reconnectGenerationForTesting: Int { reconnectSeq }
+    var isSleepingForTesting: Bool { sleeping }
+    var isLocalSensorReadInFlightForTesting: Bool { tasks.localSensor != nil }
+    var isHeartbeatInFlightForTesting: Bool { tasks.heartbeat != nil }
 
-    var hottestTemp: Double? { temps.map(\.celsius).max() }
+    func prepareForSleepForTesting() { prepareForSleep() }
+    func scheduleLocalSensorsForTesting(includeFallback: Bool) {
+        scheduleLocalSensors(includeFallback: includeFallback)
+    }
+#endif
+}
 
+extension ThermalViewModel {
     // MARK: - Lifecycle
 
     func start() {
+        guard !HelperMaintenance.isRequested(ProcessInfo.processInfo.arguments) else { return }
+        // App-hosted tests must never register a daemon or connect to live hardware.
+        guard NSClassFromString("XCTestCase") == nil,
+              ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
         guard !started else { return }
         started = true
         fan.loadSettings()
         battery.loadSettings()
-        smAppServiceState = HelperInstallService.statusText()
-        DispatchQueue.main.async {
-            HelperInstallService.registerDaemon(retrigger: false)
-        }
+        smAppServiceState = HelperInstallService.statusText(force: true)
+        session.start()
+        sleeping = false
         reconnect()
-        observeWorkspaceLifecycle()
-        resumePolling()
     }
 
     func setMenuVisible(_ visible: Bool) {
-        menuVisible = visible
-        pollingModeDidChange()
+        guard session.menuVisible != visible else { return }
+        objectWillChange.send()
+        session.setVisibility(menu: visible)
     }
 
     func setDashboardVisible(_ visible: Bool) {
-        dashboardVisible = visible
-        pollingModeDidChange()
+        guard session.dashboardVisible != visible else { return }
+        objectWillChange.send()
+        session.setVisibility(dashboard: visible)
+        if !visible { tasks.burst?.cancel() }
     }
 
-    private var telemetryInterval: TimeInterval {
-        if dashboardVisible { return TC.dashboardPollInterval }
-        if menuVisible { return TC.menuPollInterval }
-        return TC.backgroundPollInterval
-    }
-
-    private func pollingModeDidChange() {
-        guard started, !sleeping else { return }
-        scheduleTelemetryTimer()
-        schedulePowerTimer()
-        if menuVisible || dashboardVisible { refresh() }
-    }
-
-    private func resumePolling() {
-        heartbeatTimer?.invalidate()
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: TC.heartbeatInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.beat() }
-        }
-        scheduleTelemetryTimer()
-        schedulePowerTimer()
-    }
-
-    private func scheduleTelemetryTimer() {
-        telemetryTimer?.invalidate()
-        telemetryTimer = Timer.scheduledTimer(withTimeInterval: telemetryInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
-    }
-
-    private func schedulePowerTimer() {
-        powerTimer?.invalidate()
-        powerTimer = nil
-        guard dashboardVisible else { return }
-        samplePowerHistory()
-        powerTimer = Timer.scheduledTimer(withTimeInterval: TC.powerSampleInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.samplePowerHistory() }
-        }
-    }
-
-    private func suspendPolling() {
-        heartbeatTimer?.invalidate()
-        telemetryTimer?.invalidate()
-        powerTimer?.invalidate()
-        heartbeatTimer = nil
-        telemetryTimer = nil
-        powerTimer = nil
-    }
-
-    private func observeWorkspaceLifecycle() {
-        let center = NSWorkspace.shared.notificationCenter
-        workspaceObservers = [
-            center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.prepareForSleep() }
-            },
-            center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.recoverAfterWake() }
-            }
-        ]
+    func stop() {
+        prepareForSleep()
+        session.stop()
+        xpc.invalidate()
+        started = false
     }
 
     private func prepareForSleep() {
         sleeping = true
-        suspendPolling()
-        refreshTask?.cancel()
-        refreshTask = nil
+        temperaturesUnavailable = true
+        temps = []
+        tasks.cancelAll()
+        session.pause()
+        restoreGeneration += 1
+        refreshPending = false
         refreshSeq += 1
-        wakeTask?.cancel()
-        burstTask?.cancel()
+        reconnectSeq += 1
+        localSensorPending = false
+        localSensorNeedsFallback = false
+        localSensorNeedsPowerSample = false
+        localSensorGeneration += 1
         fan.cancelPendingCommands()
         battery.cancelPendingCommands()
         connectionState = .disconnected
     }
 
     private func recoverAfterWake() {
-        wakeTask?.cancel()
-        wakeTask = Task { @MainActor [weak self] in
+        tasks.wake?.cancel()
+        tasks.wake = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard let self, !Task.isCancelled else { return }
             self.xpc.invalidate()
             self.sleeping = false
-            self.resumePolling()
+            self.session.resume()
             self.reconnect()
         }
     }
 
     func reconnect() {
+        guard !sleeping, !isQuitting else { return }
+        tasks.reconnect?.cancel()
+        reconnectSeq += 1
+        let seq = reconnectSeq
         connectionState = .connecting
         helperStatusText = L10n.t("status.connecting")
         xpc.connect()
         refresh()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            guard let self else { return }
+        tasks.reconnect = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.5))
+            guard let self, !Task.isCancelled, self.reconnectSeq == seq else { return }
             if self.connectionState == .connecting {
                 self.connectionState = .disconnected
                 self.helperStatusText = L10n.t("status.need.sudo")
-                self.applyLocalSensors()
+                self.scheduleLocalSensors(includeFallback: true)
             }
-            self.promptHelperAccessIfNeeded()
+            self.tasks.reconnect = nil
+            self.battery.cancelPendingCommands()
         }
     }
 
     func refresh() {
-        guard !sleeping, refreshTask == nil else { return }
+        guard !sleeping, !isQuitting, tasks.restore == nil else { return }
+        guard tasks.refresh == nil else {
+            refreshPending = true
+            return
+        }
         smAppServiceState = HelperInstallService.statusText()
         if smAppServiceState == "requiresApproval" && connectionState != .connected {
             connectionState = .needsApproval
@@ -200,11 +246,8 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
         }
         refreshSeq += 1
         let seq = refreshSeq
-        refreshTask = Task { @MainActor [weak self] in
+        tasks.refresh = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer {
-                if self.refreshSeq == seq { self.refreshTask = nil }
-            }
             async let capabilitiesRequest = self.xpc.capabilities()
             async let fanStatusRequest = self.xpc.fanStatus()
             async let batteryStatusRequest = self.xpc.batteryStatus()
@@ -212,82 +255,168 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
             let (cap, fanStatus, batteryStatus, temperatures) = await (
                 capabilitiesRequest, fanStatusRequest, batteryStatusRequest, temperaturesRequest
             )
-            guard !Task.isCancelled else { return }
-            guard let cap else {
-                self.applyLocalSensors()
+            guard !Task.isCancelled, self.refreshSeq == seq else {
+                self.finishRefresh(seq: seq)
                 return
             }
-            self.connectionState = .connected
-            self.helperStatusText = L10n.t("status.helper.v", cap.helperVersion)
-            self.fan.apply(capabilities: cap)
-            self.battery.apply(capabilities: cap)
-            if let fanStatus { self.fan.apply(status: fanStatus) }
-            if let batteryStatus { self.battery.apply(status: batteryStatus) }
-            self.mergeTemps(temperatures)
-            self.lastError = nil
-            if cap.helperVersion != TC.helperVersion, !self.askedHelperUpgrade {
-                self.askedHelperUpgrade = true
-                HelperInstallService.upgradeEmbeddedHelper()
-                self.reconnect()
+            if let cap {
+                guard cap.protocolVersion == TC.protocolVersion else {
+                    self.connectionState = .error
+                    self.helperStatusText = L10n.t("error.protocol")
+                    self.lastError = L10n.t("error.protocol")
+                    self.finishRefresh(seq: seq)
+                    return
+                }
+                guard fanStatus != nil || cap.fanCount == 0,
+                      batteryStatus != nil || !cap.batteryPresent else {
+                    self.connectionState = .error
+                    self.helperStatusText = L10n.t("error.readback")
+                    self.fan.cancelPendingCommands()
+                    self.battery.cancelPendingCommands()
+                    self.finishRefresh(seq: seq)
+                    return
+                }
+                self.tasks.reconnect?.cancel()
+                self.tasks.reconnect = nil
+                self.connectionState = .connected
+                self.helperStatusText = L10n.t("status.helper.v", cap.helperVersion)
+                self.fan.apply(capabilities: cap)
+                self.battery.apply(capabilities: cap)
+                if let fanStatus { self.fan.apply(status: fanStatus) }
+                if let batteryStatus { self.battery.apply(status: batteryStatus) }
+                self.applyTemperatures(temperatures)
+                self.battery.helperDidBecomeReady()
+            } else {
+                self.scheduleLocalSensors(includeFallback: true)
             }
+            self.finishRefresh(seq: seq)
         }
-        battery.applyPowerSensors()
-        if connectionState != .connected {
-            applyLocalSensors()
+        scheduleLocalSensors(includeFallback: connectionState != .connected)
+    }
+
+    private func finishRefresh(seq: Int) {
+        guard refreshSeq == seq else { return }
+        tasks.refresh = nil
+        if sleeping {
+            refreshPending = false
+            return
+        }
+        guard refreshPending else { return }
+        refreshPending = false
+        refresh()
+    }
+
+    private func scheduleLocalSensors(includeFallback: Bool, recordPower: Bool = false) {
+        guard !sleeping else { return }
+        localSensorNeedsFallback = localSensorNeedsFallback || includeFallback
+        localSensorNeedsPowerSample = localSensorNeedsPowerSample || recordPower
+        if tasks.localSensor != nil {
+            localSensorPending = true
+            return
+        }
+        let fallback = localSensorNeedsFallback
+        let shouldRecordPower = localSensorNeedsPowerSample
+        localSensorNeedsFallback = false
+        localSensorNeedsPowerSample = false
+        localSensorGeneration += 1
+        let generation = localSensorGeneration
+        let loadLocalSensors = self.loadLocalSensors
+        tasks.localSensor = Task { @MainActor [weak self] in
+            let snapshot = await Task.detached(priority: .utility) {
+                loadLocalSensors(fallback)
+            }.value
+            guard let self,
+                  self.localSensorGeneration == generation,
+                  !Task.isCancelled,
+                  !self.sleeping else { return }
+            self.battery.apply(power: snapshot.power)
+            if fallback, self.connectionState != .connected {
+                self.fan.applyLocalFans(snapshot.fans)
+                self.applyTemperatures(snapshot.temperatures)
+            }
+            if shouldRecordPower, self.dashboardVisible, snapshot.power.available {
+                self.power.sample(
+                    inWatts: self.battery.systemInWatts,
+                    usageWatts: self.battery.usageWatts,
+                    adapterCap: self.battery.adapterWatts
+                )
+            }
+            self.tasks.localSensor = nil
+            guard self.localSensorPending else { return }
+            self.localSensorPending = false
+            self.scheduleLocalSensors(
+                includeFallback: self.localSensorNeedsFallback,
+                recordPower: self.localSensorNeedsPowerSample
+            )
         }
     }
 
-    private func applyLocalSensors() {
-        battery.applyLocalBattery()
-        if connectionState != .connected {
-            fan.applyLocalFans(SensorReader.fans())
-        }
-        mergeTemps(temps)
-    }
-
-    private func mergeTemps(_ incoming: [TempReading]) {
+    private func applyTemperatures(_ incoming: [TempReading]) {
         var byKey: [String: TempReading] = [:]
-        for t in SensorReader.temps() { byKey[t.key] = t }
-        for t in incoming where t.celsius > 1 { byKey[t.key] = t }
+        for reading in incoming where reading.celsius > 1 { byKey[reading.key] = reading }
         let ordered = TC.tempKeys.compactMap { byKey[$0] }
-        if !ordered.isEmpty { temps = ordered }
+        temperaturesUnavailable = ordered.isEmpty
+        temps = ordered
     }
 
     // MARK: - Power sampling
 
     func samplePowerHistory() {
-        battery.applyPowerSensors()
-        power.sample(
-            inWatts: battery.systemInWatts,
-            usageWatts: battery.usageWatts,
-            adapterCap: battery.adapterWatts
-        )
+        scheduleLocalSensors(includeFallback: connectionState != .connected, recordPower: true)
     }
 
     func burstPowerSamples() {
         guard dashboardVisible else { return }
         samplePowerHistory()
-        burstTask?.cancel()
-        burstTask = Task { @MainActor [weak self] in
-            for _ in 0..<8 {
-                try? await Task.sleep(nanoseconds: 200_000_000)
+        tasks.burst?.cancel()
+        tasks.burst = Task { @MainActor [weak self] in
+            for _ in 0..<4 {
+                try? await Task.sleep(for: .milliseconds(500))
                 guard !Task.isCancelled else { return }
                 self?.samplePowerHistory()
             }
         }
     }
 
+}
+
+extension ThermalViewModel {
     // MARK: - Heartbeat
 
+    private func handleConnectionLost() {
+        guard started, !sleeping else { return }
+        tasks.reconnect?.cancel()
+        tasks.reconnect = nil
+        tasks.refresh?.cancel()
+        tasks.refresh = nil
+        refreshPending = false
+        refreshSeq += 1
+        if connectionState != .needsApproval {
+            connectionState = .disconnected
+            helperStatusText = L10n.t("status.disconnected")
+        }
+        tasks.restore?.cancel()
+        tasks.restore = nil
+        restoreGeneration += 1
+        fan.cancelPendingCommands()
+        battery.cancelPendingCommands()
+        tasks.recovery?.cancel()
+        tasks.recovery = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, !Task.isCancelled, !self.sleeping else { return }
+            self.reconnect()
+        }
+    }
+
     func beat() {
-        Task { @MainActor [weak self] in
+        guard tasks.heartbeat == nil else { return }
+        tasks.heartbeat = Task { @MainActor [weak self] in
             guard let self else { return }
             let ok = await self.xpc.ping()
-            if ok {
-                if self.connectionState != .restoring { self.connectionState = .connected }
-            } else if self.connectionState == .connected {
-                self.connectionState = .disconnected
-                self.helperStatusText = L10n.t("status.disconnected")
+            guard !Task.isCancelled else { return }
+            self.tasks.heartbeat = nil
+            if !ok, self.connectionState == .connected {
+                self.handleConnectionLost()
             }
         }
     }
@@ -299,44 +428,37 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
             startAtLogin = on
         } else {
             startAtLogin = HelperInstallService.startAtLoginEnabled()
+            noteError(L10n.t("install.fail"))
         }
     }
 
-    func installHelper() { showHelperPermissionAlert(force: true) }
-    func openLoginItems() { HelperInstallService.openLoginItems() }
-
-    func promptHelperAccessIfNeeded() {
-        guard connectionState != .connected else { return }
-        guard !askedHelperPermission else { return }
-        askedHelperPermission = true
-        helperStatusText = HelperInstallService.registerDaemon(retrigger: HelperInstallService.needsUserApproval())
-        smAppServiceState = HelperInstallService.statusText()
-        if smAppServiceState == "requiresApproval" {
-            connectionState = .needsApproval
-            helperStatusText = L10n.t("status.approval")
-        }
-        showHelperPermissionAlert(force: false)
+    func openLoginItems() {
+        HelperInstallService.openLoginItems()
+        smAppServiceState = HelperInstallService.statusText(force: true)
     }
 
     func showHelperPermissionAlert(force: Bool = true) {
+        guard !isInstallingHelper else { return }
         if !force, connectionState == .connected { return }
         alerts.presentHelperPermission { [weak self] choice in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 switch choice {
                 case .allow:
-                    self.helperStatusText = HelperInstallService.registerDaemon(retrigger: true)
+                    self.helperStatusText = await HelperInstallService.registerDaemon(retrigger: true)
+                    guard !Task.isCancelled, !self.sleeping else { return }
                     HelperInstallService.openLoginItems()
-                    self.smAppServiceState = HelperInstallService.statusText()
+                    self.smAppServiceState = HelperInstallService.statusText(force: true)
                     if self.smAppServiceState == "requiresApproval" {
                         self.connectionState = .needsApproval
                         self.helperStatusText = L10n.t("status.approval")
                     }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                        Task { @MainActor in self?.reconnect() }
-                    }
+                    self.reconnect()
                 case .sudo:
-                    let ok = HelperInstallService.installWithAdministrator()
+                    self.isInstallingHelper = true
+                    let ok = await HelperInstallService.installWithAdministrator()
+                    self.isInstallingHelper = false
+                    guard !self.sleeping else { return }
                     if ok {
                         self.helperStatusText = L10n.t("perm.sudo.ok")
                         self.reconnect()
@@ -352,46 +474,77 @@ final class ThermalViewModel: ObservableObject, ViewModelHost {
 
     // MARK: - Cross-cutting commands
 
+    func openSettings() {
+        selectedDashboardTab = .settings
+        WindowLocator.bringDashboardForward()
+    }
+
+    func confirmRestoreSystem() {
+        alerts.confirmRestore { [weak self] in self?.restoreSystem() }
+    }
+
+    func prepareToQuit() async -> Bool {
+        guard !isQuitting else { return false }
+        isQuitting = true
+        defer { isQuitting = false }
+        let hasOverride = fan.hasTransientOverride || battery.hasTransientOverride
+        guard connectionState == .connected else {
+            if hasOverride { noteError(L10n.t("error.readback")); return false }
+            stop()
+            return true
+        }
+        tasks.refresh?.cancel()
+        tasks.refresh = nil
+        refreshPending = false
+        refreshSeq += 1
+        tasks.reconnect?.cancel()
+        tasks.reconnect = nil
+        reconnectSeq += 1
+        fan.cancelPendingCommands()
+        battery.cancelPendingCommands()
+        let result = await xpc.restore(components: RestoreResult.transient)
+        guard result.succeeded else {
+            noteError(result.message ?? L10n.t("error.readback"))
+            return false
+        }
+        stop()
+        return true
+    }
+
+    func quitApp() async {
+        NSApp.terminate(nil)
+    }
+
     func restoreSystem() {
+        restoreSystem(components: RestoreResult.all)
+    }
+
+    func retryFailedRestore() {
+        guard failedRestoreComponents != 0 else { return }
+        restoreSystem(components: failedRestoreComponents)
+    }
+
+    private func restoreSystem(components: Int) {
+        guard isConnected, !sleeping, tasks.restore == nil else { return }
+        tasks.refresh?.cancel()
+        tasks.refresh = nil
+        refreshPending = false
+        refreshSeq += 1
+        fan.cancelPendingCommands()
+        battery.cancelPendingCommands()
+        restoreGeneration += 1
+        let generation = restoreGeneration
         connectionState = .restoring
         helperStatusText = L10n.t("status.restoring")
-        Task { @MainActor [weak self] in
+        tasks.restore = Task { @MainActor [weak self] in
             guard let self else { return }
-            let (ok, err) = await self.xpc.restore()
-            self.connectionState = ok ? .connected : .error
-            if !ok {
-                self.surfaceError(err ?? L10n.t("error.cmd"))
-            } else {
-                self.lastError = nil
-                self.fan.desiredFanMode = .system
-                self.battery.chargeMode = .full
-            }
+            let result = await self.xpc.restore(components: components)
+            guard !Task.isCancelled, self.restoreGeneration == generation, !self.sleeping else { return }
+            self.tasks.restore = nil
+            self.connectionState = .connected
+            self.failedRestoreComponents = result.failedComponents
+            self.lastError = result.message
+            self.refresh()
         }
-    }
-
-    // MARK: - Window / app
-
-    func openDashboard() {
-        if WindowLocator.dashboardWindow() != nil {
-            WindowLocator.bringDashboardForward()
-            return
-        }
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.first(where: { $0.canBecomeMain && $0.isVisible == false })?.makeKeyAndOrderFront(nil)
-    }
-
-    func quitApp() { NSApp.terminate(nil) }
-
-    var menuTitle: String {
-        if connectionState != .connected { return "TC" }
-        if let rpm = fan.fans.first?.actualRPM, rpm > 0 { return "\(Int(rpm))" }
-        if battery.batteryPresent { return "\(battery.batteryPercent)%" }
-        return "TC"
-    }
-
-    var menuSymbol: String {
-        if connectionState == .connected, fan.fans.isEmpty, battery.batteryPresent { return "battery.75" }
-        return "fan"
     }
 }

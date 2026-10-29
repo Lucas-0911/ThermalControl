@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Semantic palette for the macOS-native redesign (Phase 5 & HIG overhaul).
-/// Strictly dynamic system colors adapting to Light/Dark Mode & system accent.
+/// Dynamic system colors shared by dashboard and menu-bar components.
 enum TCTheme {
     // MARK: - Semantic accents
 
@@ -16,12 +15,10 @@ enum TCTheme {
 
     // MARK: - Surfaces & Labels (Native macOS)
 
-    static let cardBackground = Color(nsColor: .controlBackgroundColor)
     static let windowBackground = Color(nsColor: .windowBackgroundColor)
     static let label = Color(nsColor: .labelColor)
     static let secondaryLabel = Color(nsColor: .secondaryLabelColor)
     static let tertiaryLabel = Color(nsColor: .tertiaryLabelColor)
-    static let quaternaryLabel = Color(nsColor: .quaternaryLabelColor)
     static let separator = Color(nsColor: .separatorColor)
 
     /// Native control fill

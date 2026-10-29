@@ -28,6 +28,5 @@ protocol SMCProtocol: AnyObject {
 
 extension SMCService: SMCProtocol {}
 
-// NOTE: `FanControlling` / `BatteryControlling` protocol seams are declared in
-// Helper/ControllerSeams.swift — they reference only Shared types here, but
-// the concrete controllers exist only in the Helper target.
+// NOTE: `FanControlling` / `BatteryControlling` live in
+// Shared/Watchdog/ControllerProtocols.swift; concrete controllers stay in Helper.

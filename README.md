@@ -38,9 +38,9 @@ Bạn có thể tải ngay bộ cài đóng gói sẵn tại thư mục [`dist/`
 - **Bảo vệ pin chuyên sâu**:
   - Cơ chế **Direct SMC Write** can thiệp thanh ghi `CHTE` / `CHIE` ngắt dòng sạc hoàn toàn về **0 mA** khi đạt ngưỡng thiết lập.
   - Tự động xả tải và bảo vệ chống chai pin khi cắm sạc qua đêm hoặc dùng màn hình ngoài (Thunderbolt/Type-C).
-- **An toàn tuyệt đối (Safety Watchdog)**:
-  - Tự động kích hoạt quạt tối đa nếu CPU vượt ngưỡng 100°C.
-  - Watchdog heartbeat 45 giây: Nếu app bị tắt đột ngột, daemon helper sẽ tự động hoàn trả quyền điều khiển quạt về hệ thống.
+- **Safety Watchdog**:
+  - Tự động trả quạt về chế độ hệ thống nếu nhiệt độ vượt ngưỡng 100°C đủ lâu.
+  - Watchdog heartbeat 15 giây: nếu app mất kết nối, helper trả quạt về hệ thống và tắt force discharge.
 
 ---
 
@@ -82,16 +82,25 @@ File đóng gói hoàn chỉnh sẽ xuất hiện trong thư mục `dist/`.
 
 ```
 ThermalControl/
-├── App/                # Mã nguồn giao diện SwiftUI, MenuBar, Dashboard, Assets
-│   ├── Views/          # MenuBarView, DashboardView, Theme, Custom Components
-│   └── ViewModels/     # ThermalViewModel, FanViewModel, BatteryViewModel
-├── Helper/             # Privileged Root Daemon điều khiển SMC qua IOKit & XPC
-│   ├── SMC/            # SMC IOKit Driver, Tahoe SMC Charge Controller
-│   └── Safety/         # SafetyWatchdog giám sát nhiệt độ phần cứng
-├── Shared/             # Giao thức XPC chung, Model, SMC Keys, Constants
-├── Scripts/            # Script cài đặt helper, đóng gói .pkg & .dmg
-└── dist/               # File phát hành cài đặt (ThermalControl.pkg, .dmg)
+├── App/                    # SwiftUI, view models, local read-only telemetry
+├── Helper/
+│   ├── Auth/               # Xác thực client XPC
+│   └── XPC/                # Privileged service implementation
+├── Shared/
+│   ├── Models/             # DTO dùng chung qua XPC
+│   ├── SMC/                # AppleSMC primitives
+│   ├── Watchdog/           # Safety loop và controller test seams
+│   └── XPC/                # NSXPC protocol
+├── Tests/                  # App-hosted và hostless helper tests
+├── Scripts/                # Build package, cài và gỡ helper
+├── docs/                   # Kiến trúc và hướng dẫn hiện hành
+└── dist/                   # PKG/DMG phát hành được track có chủ ý
 ```
+
+- [Kiến trúc và safety invariants](docs/ARCHITECTURE.md)
+- [Build lúc phát triển](HUONG_DAN_BUILD.md)
+- [Đóng gói PKG/DMG](HUONG_DAN_DONG_GOI.md)
+- [Cài đặt cho người nhận](docs/CAI_DAT_CHO_NGUOI_DUNG.md)
 
 ---
 

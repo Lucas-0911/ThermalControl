@@ -6,10 +6,7 @@ struct PowerSample: Identifiable, Equatable {
     var id: Date { time }
 }
 
-/// Power/usage history for the sparklines, extracted from the
-/// `ThermalViewModel` god object (Phase 4). The orchestrator pushes samples
-/// (after refreshing battery telemetry); this VM only owns the rolling
-/// window + chart maxima.
+/// Rolling power and usage history for sparklines.
 @MainActor
 final class PowerViewModel: ObservableObject {
     @Published var powerHistory: [PowerSample] = []

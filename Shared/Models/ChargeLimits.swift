@@ -1,9 +1,6 @@
 import Foundation
 
-/// Charge-window clamping, extracted from `BatteryViewModel`/`ThermalViewModel`
-/// so the bounds contract is one place and unit-testable.
-///
-/// Contract:
+/// Charge-window clamping contract:
 ///   - upper clamps to `[40, 99]`
 ///   - lower clamps to `[20, upper-5]`
 struct ChargeLimits: Equatable {

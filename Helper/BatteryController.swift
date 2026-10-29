@@ -2,7 +2,16 @@ import Foundation
 import IOKit.ps
 
 final class BatteryController {
+    typealias BatteryReader = () -> (present: Bool, percent: Int, ac: Bool)
+
     private let smc: any SMCProtocol
+    private let batteryReader: BatteryReader
+    private let monotonicNow: () -> TimeInterval
+    private var dischargeTarget: Int?
+    private var dischargeDeadline: TimeInterval?
+    private var dischargeStopVerified = false
+    private var dischargeStopReason: String?
+    private var dischargeStopPending = false
     private let lock = NSRecursiveLock()
     private var familyStore: BatteryFamily = .none
     private(set) var upper = 80
@@ -14,13 +23,22 @@ final class BatteryController {
     private var inhibitByte: UInt8 = TC.chargeInhibitByteHigh
     private var chteSize: UInt32 = 4
     private var chteIsU8 = false
-    private var suppressTickUntil = Date.distantPast
+    private var suppressTickUntil: TimeInterval = 0
+    private var chargingApplied: Bool?
     private var hasCHTE = false
     private var hasCH0B = false
     private var hasCH0C = false
     private var hasCHIE = false
 
-    init(smc: any SMCProtocol) { self.smc = smc }
+    init(
+        smc: any SMCProtocol,
+        batteryReader: @escaping BatteryReader = SensorReads.batteryIO,
+        monotonicNow: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.smc = smc
+        self.batteryReader = batteryReader
+        self.monotonicNow = monotonicNow
+    }
 
     var family: BatteryFamily {
         lock.lock(); defer { lock.unlock() }
@@ -29,6 +47,10 @@ final class BatteryController {
 
     func probe() {
         lock.lock(); defer { lock.unlock() }
+        chargingApplied = nil
+        dischargeStopVerified = false
+        dischargeTarget = nil
+        dischargeDeadline = nil
         hasCHTE = smc.keyExists(SMCKey.chTE.rawValue)
         hasCHIE = smc.keyExists(SMCKey.chIE.rawValue)
         hasCH0B = smc.keyExists(SMCKey.ch0B.rawValue)
@@ -44,7 +66,20 @@ final class BatteryController {
 
     var canControl: Bool {
         lock.lock(); defer { lock.unlock() }
-        return familyStore != .none
+        return hasCHTE || hasCH0B || hasCH0C
+    }
+
+    var canForceDischarge: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return canControl && dischargeKey != nil
+    }
+
+    private var dischargeKey: String? {
+        switch familyStore {
+        case .tahoe: return hasCHIE ? SMCKey.chIE.rawValue : nil
+        case .legacy: return smc.keyExists(SMCKey.ch0I.rawValue) ? SMCKey.ch0I.rawValue : nil
+        case .none: return nil
+        }
     }
 
     func status() -> BatteryStatus {
@@ -57,93 +92,211 @@ final class BatteryController {
             amperageMA: amps, voltageMV: volts,
             upperLimit: upper, lowerLimit: lower,
             chargingEnabled: chargingEnabled, maintainActive: maintainActive,
-            forceDischarge: forceDischarge, keyFamily: familyStore.rawValue, lastError: lastError
+            forceDischarge: forceDischarge, keyFamily: familyStore.rawValue, lastError: lastError,
+            canControlCharge: canControl, canForceDischarge: canForceDischarge,
+            dischargeTargetPercent: dischargeTarget ?? -1,
+            dischargeRemainingSeconds: dischargeDeadline.map { max(0, $0 - monotonicNow()) } ?? 0,
+            dischargeStopVerified: dischargeStopVerified, dischargeStopReason: dischargeStopReason
         )
     }
 
     func suppressTick(seconds: TimeInterval = 1.2) {
         lock.lock(); defer { lock.unlock() }
-        suppressTickUntil = Date().addingTimeInterval(seconds)
+        suppressTickUntil = monotonicNow() + max(0, seconds)
     }
 
     func setLimit(upper: Int, lower: Int) -> (Bool, String?) {
         lock.lock(); defer { lock.unlock() }
-        guard canControl else { return (false, "Máy không có key sạc") }
+        guard canControl else { return (false, "Máy không có key charge-inhibit") }
+        guard !forceDischarge, !dischargeStopPending else { return (false, "Dừng xả pin trước khi đổi giới hạn sạc") }
+        let io = readIOKit()
+        guard io.present, (0...100).contains(io.percent) else { return (false, "Dữ liệu pin không đáng tin cậy") }
+        if dischargeKey != nil, !dischargeStopVerified {
+            let stopped = stopForceDischarge()
+            guard stopped.0 else { return stopped }
+        }
         suppressTick(seconds: 1.2)
         let limits = ChargeLimits(upper: upper, lower: lower)
+        let previous = (self.upper, self.lower, maintainActive, chargingEnabled)
         self.upper = limits.upper
         self.lower = limits.lower
         maintainActive = true
-        return applyImmediate(percent: status().percent)
+        let result = applyImmediate(percent: io.percent)
+        if !result.0 {
+            (self.upper, self.lower, maintainActive, chargingEnabled) = previous
+        }
+        return result
     }
 
     func setChargingEnabled(_ enabled: Bool) -> (Bool, String?) {
         lock.lock(); defer { lock.unlock() }
+        guard canControl else { return (false, "Máy không có key charge-inhibit") }
+        guard !forceDischarge, !dischargeStopPending else { return (false, "Dừng xả pin trước khi đổi trạng thái sạc") }
+        if dischargeKey != nil, !dischargeStopVerified {
+            let stopped = stopForceDischarge()
+            guard stopped.0 else { return stopped }
+        }
         suppressTick(seconds: 1.2)
+        let previous = (upper, lower, maintainActive, chargingEnabled)
         maintainActive = false
         chargingEnabled = enabled
         if enabled {
             upper = 100
             lower = 95
         }
-        return writeGate(enabled: enabled)
+        let result = writeGate(enabled: enabled)
+        if !result.0 {
+            (upper, lower, maintainActive, chargingEnabled) = previous
+        }
+        return result
     }
 
     func setForceDischarge(_ enabled: Bool) -> (Bool, String?) {
         lock.lock(); defer { lock.unlock() }
-        forceDischarge = enabled
+        guard enabled else { return stopForceDischarge() }
+        guard !dischargeStopPending else { return (false, "Chưa xác minh dừng phiên xả pin trước") }
+        guard canForceDischarge, let key = dischargeKey else { return (false, "Không hỗ trợ force discharge an toàn") }
+        guard maintainActive else { return (false, "Bật duy trì giới hạn sạc trước khi xả pin") }
+        let io = readIOKit()
+        guard io.present, (0...100).contains(io.percent), io.ac, io.percent > upper else {
+            return (false, "Xả pin cần AC và mức pin đáng tin cậy cao hơn giới hạn trên")
+        }
+        // Repeating Start must not extend the helper-owned session deadline.
+        if forceDischarge, !dischargeStopPending {
+            if let deadline = dischargeDeadline, monotonicNow() < deadline { return (true, nil) }
+            _ = stopForceDischarge(reason: "deadline")
+            return (false, "Phiên xả pin đã hết hạn")
+        }
+        let stopped = stopForceDischarge()
+        guard stopped.0 else { return stopped }
+        dischargeStopVerified = false
+        dischargeStopPending = true
         do {
-            switch familyStore {
-            case .legacy:
-                if smc.keyExists(SMCKey.ch0I.rawValue) { try smc.writeUInt8(SMCKey.ch0I.rawValue, enabled ? 1 : 0, verify: false) }
-            case .tahoe:
-                if smc.keyExists(SMCKey.chIE.rawValue) { try smc.writeUInt8(SMCKey.chIE.rawValue, enabled ? 1 : 0, verify: false) }
-            case .none:
-                return (false, "Không hỗ trợ force discharge")
-            }
+            try smc.writeUInt8(key, 1, verify: true)
+            guard try smc.readUInt8(key) == 1 else { throw SMCError.verify(key) }
+            forceDischarge = true
+            dischargeStopPending = false
+            dischargeTarget = upper
+            // ponytail: one session, hard 60-minute ceiling; add configurable policy only if required.
+            dischargeDeadline = monotonicNow() + 60 * 60
+            dischargeStopReason = nil
+            chargingApplied = nil
             lastError = nil
             return (true, nil)
         } catch {
-            lastError = "\(error)"
+            let startError = "\(error)"
+            // A throwing write may still have reached hardware. Do not claim Off without readback.
+            forceDischarge = true
+            let stopped = stopForceDischarge(reason: "startFailed")
+            lastError = stopped.0 ? startError : "\(startError); \(stopped.1 ?? "Không xác minh được dừng xả pin")"
+            return (false, lastError)
+        }
+    }
+
+    @discardableResult
+    func stopForceDischarge() -> (Bool, String?) {
+        lock.lock(); defer { lock.unlock() }
+        return stopForceDischarge(reason: "manual")
+    }
+
+    private func stopForceDischarge(reason: String) -> (Bool, String?) {
+        dischargeStopReason = reason
+        guard let key = dischargeKey else {
+            if forceDischarge || dischargeStopPending {
+                dischargeStopVerified = false
+                lastError = "Không tìm thấy key để dừng xả pin"
+                return (false, lastError)
+            }
+            dischargeStopVerified = true
+            return (true, nil)
+        }
+        dischargeStopVerified = false
+        dischargeStopPending = true
+        do {
+            // Always verify hardware; cached false is not proof after reset or a partial write.
+            try smc.writeUInt8(key, 0, verify: true)
+            guard try smc.readUInt8(key) == 0 else { throw SMCError.verify(key) }
+            forceDischarge = false
+            dischargeStopPending = false
+            dischargeStopVerified = true
+            dischargeTarget = nil
+            dischargeDeadline = nil
+            chargingApplied = nil
+            lastError = nil
+            return (true, nil)
+        } catch {
+            lastError = "Không xác minh được dừng xả pin: \(error)"
             return (false, lastError)
         }
     }
 
     func disableForceDischarge() {
-        lock.lock(); defer { lock.unlock() }
-        guard forceDischarge else { return }
-        _ = setForceDischarge(false)
+        _ = stopForceDischarge()
     }
 
     func tick() {
         lock.lock(); defer { lock.unlock() }
-        guard Date() >= suppressTickUntil else { return }
-        if maintainActive { _ = apply(percent: status().percent) }
-        if forceDischarge { _ = setForceDischarge(true) }
+        let io = readIOKit()
+        if maintainActive && (!io.present || !(0...100).contains(io.percent)) {
+            let restored = restoreDefaultCharge()
+            dischargeStopReason = "untrustedIO"
+            lastError = restored.0 ? "Dữ liệu pin không đáng tin cậy; đã khôi phục sạc mặc định"
+                : "Dữ liệu pin không đáng tin cậy; \(restored.1 ?? "Khôi phục sạc thất bại")"
+            return
+        }
+        if forceDischarge || dischargeStopPending {
+            let reason: String?
+            if dischargeStopPending { reason = dischargeStopReason ?? "stopRetry" }
+            else if !io.present || !(0...100).contains(io.percent) { reason = "untrustedIO" }
+            else if !io.ac { reason = "unplugged" }
+            else if let deadline = dischargeDeadline, monotonicNow() >= deadline { reason = "deadline" }
+            else if let target = dischargeTarget, io.percent <= target { reason = "targetReached" }
+            else if dischargeDeadline == nil || dischargeTarget == nil { reason = "sessionMissing" }
+            else { reason = nil }
+            if let reason { _ = stopForceDischarge(reason: reason) }
+            if forceDischarge || dischargeStopPending { return }
+        }
+        guard monotonicNow() >= suppressTickUntil, canControl,
+              dischargeKey == nil || dischargeStopVerified,
+              io.present, (0...100).contains(io.percent) else { return }
+        if maintainActive { _ = apply(percent: io.percent) }
     }
 
-    func restoreDefaultCharge() {
+    @discardableResult
+    func restoreDefaultCharge() -> (Bool, String?) {
         lock.lock(); defer { lock.unlock() }
-        maintainActive = false
-        forceDischarge = false
-        _ = setForceDischarge(false)
-        _ = writeGate(enabled: true)
-        chargingEnabled = true
+        let discharge = stopForceDischarge()
+        guard discharge.0 else { return discharge }
+        // CHIE alone is a discharge key, never a charge-inhibit capability.
+        guard canControl else { return (true, nil) }
+        let gate = writeGate(enabled: true)
+        if gate.0 && dischargeStopVerified {
+            maintainActive = false
+            chargingEnabled = true
+            upper = 100
+            lower = 95
+        }
+        let errors = [discharge, gate].filter { !$0.0 }.map { $0.1 ?? "Restore failed" }
+        if !errors.isEmpty { lastError = errors.joined(separator: "; ") }
+        return (errors.isEmpty, errors.isEmpty ? nil : lastError)
     }
 
     private func applyImmediate(percent: Int) -> (Bool, String?) {
-        if percent >= upper {
-            chargingEnabled = false
-            return writeGate(enabled: false)
-        }
-        chargingEnabled = true
-        return writeGate(enabled: true)
+        let desired = percent < upper
+        let result = writeGate(enabled: desired)
+        if result.0 { chargingEnabled = desired }
+        return result
     }
 
     private func apply(percent: Int) -> (Bool, String?) {
-        if percent >= upper { chargingEnabled = false; return writeGate(enabled: false) }
-        if percent <= lower { chargingEnabled = true; return writeGate(enabled: true) }
-        return writeGate(enabled: chargingEnabled)
+        let desired: Bool
+        if percent >= upper { desired = false }
+        else if percent <= lower { desired = true }
+        else { return (true, nil) }
+        guard chargingApplied != desired else { return (true, nil) }
+        let result = writeGate(enabled: desired)
+        if result.0 { chargingEnabled = desired }
+        return result
     }
 
     private func writeTahoeInhibit(_ inhibit: Bool) throws {
@@ -171,8 +324,7 @@ final class BatteryController {
     ///     back to `TC.chargeInhibitByteLow` (0x01) when B0AC still shows
     ///     charging current above `chargeTruthMA` after the 0.35s settle sleep.
     /// The sleeps, retry branches and byte values are load-bearing — reordering
-    /// or converting these writes can stop the charge inhibit working on real
-    /// hardware. (Refactor plan Phase 3 deliberately leaves this untouched.)
+    /// or converting these writes can stop charge inhibit on real hardware.
     ///
     /// `smc -k CHTE -w 01000000` to inhibit; also CH0B/CH0C 0x02 on machines that still have them.
     private func writeGate(enabled: Bool) -> (Bool, String?) {
@@ -217,6 +369,7 @@ final class BatteryController {
             } else if hasCHIE {
                 try? smc.writeUInt8(SMCKey.chIE.rawValue, 0, verify: false)
             }
+            chargingApplied = enabled
             lastError = nil
             return (true, nil)
         } catch {
@@ -226,6 +379,6 @@ final class BatteryController {
     }
 
     private func readIOKit() -> (present: Bool, percent: Int, ac: Bool) {
-        SensorReads.batteryIO()
+        batteryReader()
     }
 }

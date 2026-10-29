@@ -7,9 +7,10 @@ struct SoftNumberField: View {
     var enabled = true
     var onCommit: () -> Void = {}
     var onLive: () -> Void = {}
+    var label = ""
 
     var body: some View {
-        KeyableIntField(value: $value, enabled: enabled, onCommit: onCommit, onLive: onLive)
+        KeyableIntField(value: $value, enabled: enabled, onCommit: onCommit, onLive: onLive, label: label)
             .frame(width: width, height: 26)
             .background(
                 TCTheme.fieldFill,
@@ -25,6 +26,7 @@ struct KeyableIntField: NSViewRepresentable {
     var enabled: Bool
     var onCommit: () -> Void
     var onLive: () -> Void
+    var label = ""
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -44,6 +46,7 @@ struct KeyableIntField: NSViewRepresentable {
     func updateNSView(_ tf: NSTextField, context: Context) {
         context.coordinator.parent = self
         tf.isEnabled = enabled
+        tf.setAccessibilityLabel(label)
         if tf.currentEditor() == nil, tf.stringValue != "\(value)" {
             tf.stringValue = "\(value)"
         }
@@ -65,21 +68,21 @@ struct KeyableIntField: NSViewRepresentable {
         func controlTextDidEndEditing(_ obj: Notification) {
             guard let tf = obj.object as? NSTextField else { return }
             apply(tf.stringValue, live: false)
-            parent.onCommit()
+            tf.stringValue = "\(parent.value)"
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy sel: Selector) -> Bool {
             if sel == #selector(NSResponder.insertNewline(_:)) {
                 apply(textView.string, live: false)
-                parent.onCommit()
+                control.window?.makeFirstResponder(nil)
                 return true
             }
             return false
         }
 
         private func apply(_ raw: String, live: Bool) {
-            let digits = raw.filter(\.isNumber)
-            guard let n = Int(digits) else { return }
+            guard parent.enabled, !raw.isEmpty, raw.allSatisfy({ $0 >= "0" && $0 <= "9" }),
+                  let n = Int(raw) else { return }
             if parent.value != n { parent.value = n }
             if live { parent.onLive() }
         }

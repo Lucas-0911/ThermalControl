@@ -11,8 +11,9 @@ public final class FanChannel: NSObject, NSSecureCoding {
     @objc public var maxRPM: Double
     @objc public var modeRaw: Int
     @objc public var modeKey: String
+    @objc public var goalRPM: Double
 
-    public init(index: Int, actualRPM: Double, targetRPM: Double, minRPM: Double, maxRPM: Double, modeRaw: Int, modeKey: String) {
+    public init(index: Int, actualRPM: Double, targetRPM: Double, minRPM: Double, maxRPM: Double, modeRaw: Int, modeKey: String, goalRPM: Double = -1) {
         self.index = index
         self.actualRPM = actualRPM
         self.targetRPM = targetRPM
@@ -20,12 +21,14 @@ public final class FanChannel: NSObject, NSSecureCoding {
         self.maxRPM = maxRPM
         self.modeRaw = modeRaw
         self.modeKey = modeKey
+        self.goalRPM = goalRPM
     }
 
     public required init?(coder: NSCoder) {
         index = coder.decodeInteger(forKey: "index")
         actualRPM = coder.decodeDouble(forKey: "actualRPM")
         targetRPM = coder.decodeDouble(forKey: "targetRPM")
+        goalRPM = coder.containsValue(forKey: "goalRPM") ? coder.decodeDouble(forKey: "goalRPM") : -1
         minRPM = coder.decodeDouble(forKey: "minRPM")
         maxRPM = coder.decodeDouble(forKey: "maxRPM")
         modeRaw = coder.decodeInteger(forKey: "modeRaw")
@@ -36,6 +39,7 @@ public final class FanChannel: NSObject, NSSecureCoding {
         coder.encode(index, forKey: "index")
         coder.encode(actualRPM, forKey: "actualRPM")
         coder.encode(targetRPM, forKey: "targetRPM")
+        coder.encode(goalRPM, forKey: "goalRPM")
         coder.encode(minRPM, forKey: "minRPM")
         coder.encode(maxRPM, forKey: "maxRPM")
         coder.encode(modeRaw, forKey: "modeRaw")

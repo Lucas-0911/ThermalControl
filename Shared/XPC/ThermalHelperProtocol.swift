@@ -6,11 +6,13 @@ import Foundation
     func getFanStatus(reply: @escaping (FanStatus) -> Void)
     func setFanMode(_ mode: Int, reply: @escaping (Bool, String?) -> Void)
     func setFanTargetRPM(_ rpm: Int, fanIndex: Int, reply: @escaping (Bool, String?) -> Void)
+    func setFanTargets(_ indexes: [NSNumber], rpms: [NSNumber], reply: @escaping (Bool, String?) -> Void)
     func getBatteryStatus(reply: @escaping (BatteryStatus) -> Void)
     func setChargeLimit(_ upper: Int, lower: Int, reply: @escaping (Bool, String?) -> Void)
     func setChargingEnabled(_ enabled: Bool, reply: @escaping (Bool, String?) -> Void)
     func setForceDischarge(_ enabled: Bool, reply: @escaping (Bool, String?) -> Void)
     func restoreSystemControl(reply: @escaping (Bool, String?) -> Void)
+    func restoreComponents(_ components: Int, reply: @escaping (RestoreResult) -> Void)
     func getThermalSnapshot(reply: @escaping ([TempReading]) -> Void)
 }
 
@@ -18,6 +20,7 @@ enum ThermalXPC {
     static func makeInterface() -> NSXPCInterface {
         let iface = NSXPCInterface(with: ThermalHelperProtocol.self)
         allow(iface, #selector(ThermalHelperProtocol.getCapabilities(reply:)), [Capabilities.self])
+        allow(iface, #selector(ThermalHelperProtocol.restoreComponents(_:reply:)), [RestoreResult.self])
         allow(iface, #selector(ThermalHelperProtocol.getFanStatus(reply:)), [FanStatus.self, FanChannel.self])
         allow(iface, #selector(ThermalHelperProtocol.getBatteryStatus(reply:)), [BatteryStatus.self])
         allow(iface, #selector(ThermalHelperProtocol.getThermalSnapshot(reply:)), [TempReading.self])

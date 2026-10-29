@@ -9,11 +9,12 @@ public final class Capabilities: NSObject, NSSecureCoding {
     @objc public var ftstPresent: Bool
     @objc public var batteryPresent: Bool
     @objc public var batteryControl: Bool
+    @objc public var forceDischargeControl: Bool = false
     @objc public var batteryFamily: String
     @objc public var helperVersion: String
     @objc public var protocolVersion: Int
 
-    public init(fanCount: Int, fanControl: Bool, ftstPresent: Bool, batteryPresent: Bool, batteryControl: Bool, batteryFamily: String, helperVersion: String, protocolVersion: Int = 2) {
+    public init(fanCount: Int, fanControl: Bool, ftstPresent: Bool, batteryPresent: Bool, batteryControl: Bool, batteryFamily: String, helperVersion: String, protocolVersion: Int = TC.protocolVersion) {
         self.fanCount = fanCount
         self.fanControl = fanControl
         self.ftstPresent = ftstPresent
@@ -30,6 +31,7 @@ public final class Capabilities: NSObject, NSSecureCoding {
         ftstPresent = coder.decodeBool(forKey: "ftstPresent")
         batteryPresent = coder.decodeBool(forKey: "batteryPresent")
         batteryControl = coder.decodeBool(forKey: "batteryControl")
+        forceDischargeControl = coder.decodeBool(forKey: "forceDischargeControl")
         batteryFamily = (coder.decodeObject(of: NSString.self, forKey: "batteryFamily") as String?) ?? "none"
         helperVersion = (coder.decodeObject(of: NSString.self, forKey: "helperVersion") as String?) ?? "0"
         let pv = coder.decodeInteger(forKey: "protocolVersion")
@@ -42,6 +44,7 @@ public final class Capabilities: NSObject, NSSecureCoding {
         coder.encode(ftstPresent, forKey: "ftstPresent")
         coder.encode(batteryPresent, forKey: "batteryPresent")
         coder.encode(batteryControl, forKey: "batteryControl")
+        coder.encode(forceDischargeControl, forKey: "forceDischargeControl")
         coder.encode(batteryFamily as NSString, forKey: "batteryFamily")
         coder.encode(helperVersion as NSString, forKey: "helperVersion")
         coder.encode(protocolVersion, forKey: "protocolVersion")

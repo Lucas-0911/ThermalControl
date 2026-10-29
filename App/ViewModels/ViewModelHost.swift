@@ -1,11 +1,11 @@
 import Foundation
 
-/// Coordinator seam between the feature view models and the orchestrating
-/// `ThermalViewModel`. Errors are *reported up* instead of the view models
-/// driving `NSAlert` themselves (Phase 4: presentation leaves the business
-/// layer — `AlertPresenter` is owned by the orchestrator).
+/// Test seam between feature view models and lifecycle/error presentation.
 @MainActor
 protocol ViewModelHost: AnyObject {
+    /// True while startup is actively establishing the helper connection.
+    var isConnecting: Bool { get }
+
     /// Mirrors the old `controlsEnabled` (connectionState == .connected).
     var isConnected: Bool { get }
 

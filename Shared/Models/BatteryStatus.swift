@@ -16,11 +16,20 @@ public final class BatteryStatus: NSObject, NSSecureCoding {
     @objc public var forceDischarge: Bool
     @objc public var keyFamily: String
     @objc public var lastError: String?
+    @objc public var canControlCharge: Bool
+    @objc public var canForceDischarge: Bool
+    @objc public var dischargeTargetPercent: Int
+    @objc public var dischargeRemainingSeconds: TimeInterval
+    @objc public var dischargeStopVerified: Bool
+    @objc public var dischargeStopReason: String?
 
     public init(
         present: Bool, percent: Int, externalAC: Bool, amperageMA: Double, voltageMV: Double,
         upperLimit: Int, lowerLimit: Int, chargingEnabled: Bool, maintainActive: Bool,
-        forceDischarge: Bool, keyFamily: String, lastError: String? = nil
+        forceDischarge: Bool, keyFamily: String, lastError: String? = nil,
+        canControlCharge: Bool = false, canForceDischarge: Bool = false,
+        dischargeTargetPercent: Int = -1, dischargeRemainingSeconds: TimeInterval = 0,
+        dischargeStopVerified: Bool = false, dischargeStopReason: String? = nil
     ) {
         self.present = present
         self.percent = percent
@@ -34,6 +43,12 @@ public final class BatteryStatus: NSObject, NSSecureCoding {
         self.forceDischarge = forceDischarge
         self.keyFamily = keyFamily
         self.lastError = lastError
+        self.canControlCharge = canControlCharge
+        self.canForceDischarge = canForceDischarge
+        self.dischargeTargetPercent = dischargeTargetPercent
+        self.dischargeRemainingSeconds = dischargeRemainingSeconds
+        self.dischargeStopVerified = dischargeStopVerified
+        self.dischargeStopReason = dischargeStopReason
     }
 
     public required init?(coder: NSCoder) {
@@ -49,6 +64,13 @@ public final class BatteryStatus: NSObject, NSSecureCoding {
         forceDischarge = coder.decodeBool(forKey: "forceDischarge")
         keyFamily = (coder.decodeObject(of: NSString.self, forKey: "keyFamily") as String?) ?? "none"
         lastError = coder.decodeObject(of: NSString.self, forKey: "lastError") as String?
+        canControlCharge = coder.decodeBool(forKey: "canControlCharge")
+        canForceDischarge = coder.decodeBool(forKey: "canForceDischarge")
+        dischargeTargetPercent = coder.containsValue(forKey: "dischargeTargetPercent")
+            ? coder.decodeInteger(forKey: "dischargeTargetPercent") : -1
+        dischargeRemainingSeconds = coder.decodeDouble(forKey: "dischargeRemainingSeconds")
+        dischargeStopVerified = coder.decodeBool(forKey: "dischargeStopVerified")
+        dischargeStopReason = coder.decodeObject(of: NSString.self, forKey: "dischargeStopReason") as String?
     }
 
     public func encode(with coder: NSCoder) {
@@ -64,5 +86,11 @@ public final class BatteryStatus: NSObject, NSSecureCoding {
         coder.encode(forceDischarge, forKey: "forceDischarge")
         coder.encode(keyFamily as NSString, forKey: "keyFamily")
         coder.encode(lastError as NSString?, forKey: "lastError")
+        coder.encode(canControlCharge, forKey: "canControlCharge")
+        coder.encode(canForceDischarge, forKey: "canForceDischarge")
+        coder.encode(dischargeTargetPercent, forKey: "dischargeTargetPercent")
+        coder.encode(dischargeRemainingSeconds, forKey: "dischargeRemainingSeconds")
+        coder.encode(dischargeStopVerified, forKey: "dischargeStopVerified")
+        coder.encode(dischargeStopReason as NSString?, forKey: "dischargeStopReason")
     }
 }

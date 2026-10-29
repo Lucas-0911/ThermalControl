@@ -5,15 +5,14 @@ public enum TC {
     public static let helperBundleID = "com.thermalcontrol.helper"
     public static let machServiceName = "com.thermalcontrol.helper"
     public static let helperPlistName = "com.thermalcontrol.helper.plist"
-    public static let helperVersion = "1.2.2"
-    public static let protocolVersion = 2
+    public static let helperVersion = "1.5.0"
+    public static let protocolVersion = 5
     /// Derived from `SMCKey` (single source of truth) — rawValues must stay
     /// byte-identical to the hardware keys.
     public static let tempKeys = SMCKey.tempKeys.map(\.rawValue)
 
     public static let heartbeatInterval: TimeInterval = 5
     public static let heartbeatTimeout: TimeInterval = 15
-    public static let uiPollInterval: TimeInterval = 3
     public static let backgroundPollInterval: TimeInterval = 15
     public static let menuPollInterval: TimeInterval = 2.5
     public static let dashboardPollInterval: TimeInterval = 2

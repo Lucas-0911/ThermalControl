@@ -20,13 +20,21 @@ enum StateStore {
         }
     }
 
-    static func save(_ s: PersistedState) {
+    @discardableResult
+    static func save(_ s: PersistedState) -> Result<Void, Error> {
+        save(s, to: file)
+    }
+
+    @discardableResult
+    static func save(_ s: PersistedState, to destination: URL) -> Result<Void, Error> {
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(s)
-            try data.write(to: file, options: .atomic)
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(s.safeForPersistence)
+            try data.write(to: destination, options: .atomic)
+            return .success(())
         } catch {
             Logger.state.error("save failed: \(error.localizedDescription, privacy: .public)")
+            return .failure(error)
         }
     }
 

@@ -1,25 +1,26 @@
 import Foundation
 import os
 
-/// `NSXPCListenerDelegate` — accepts connections only from same-Team-ID
-/// callers (`ClientAuthenticator`) and vends `HelperXPCService`.
-/// Split out of the old `HelperDelegate` god object (Phase 3c).
+/// Vends `HelperXPCService` only to the signed app from this helper's team.
 final class HelperXPCDelegate: NSObject, NSXPCListenerDelegate {
     private let service: HelperXPCService
-    private let teamIDs: Set<String>
+    private let clientRequirement: String?
 
     init(service: HelperXPCService) {
         self.service = service
-        self.teamIDs = ClientAuthenticator.ownTeams()
+        self.clientRequirement = ClientAuthenticator.ownTeam().flatMap { ClientAuthenticator.clientRequirement(teamID: $0) }
         super.init()
     }
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection c: NSXPCConnection) -> Bool {
-        guard ClientAuthenticator.verify(connection: c, teamIDs: teamIDs) else {
-            Logger.helper.warning("reject pid=\(c.processIdentifier, privacy: .public) team mismatch or unsigned")
+        guard let clientRequirement else {
+            Logger.helper.error("reject XPC client: helper signing identity unavailable or invalid")
             c.invalidate()
             return false
         }
+        // Native macOS 13+ peer validation uses the connection's audit identity, not a reusable PID.
+        // Set before resume/exported messages; Foundation rejects peers failing this requirement.
+        c.setCodeSigningRequirement(clientRequirement)
         c.exportedInterface = ThermalXPC.makeInterface()
         c.exportedObject = service
         c.resume()

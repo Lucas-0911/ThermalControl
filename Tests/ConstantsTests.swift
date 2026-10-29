@@ -20,7 +20,6 @@ final class ConstantsTests: XCTestCase {
     func testTimingConstants() {
         XCTAssertEqual(TC.heartbeatInterval, 5)
         XCTAssertEqual(TC.heartbeatTimeout, 15)
-        XCTAssertEqual(TC.uiPollInterval, 3)
         XCTAssertEqual(TC.backgroundPollInterval, 15)
         XCTAssertEqual(TC.menuPollInterval, 2.5)
         XCTAssertEqual(TC.dashboardPollInterval, 2)
@@ -41,8 +40,8 @@ final class ConstantsTests: XCTestCase {
     }
 
     func testProtocolVersionStable() {
-        XCTAssertEqual(TC.protocolVersion, 2)
-        XCTAssertEqual(TC.helperVersion, "1.2.2")
+        XCTAssertEqual(TC.protocolVersion, 5)
+        XCTAssertEqual(TC.helperVersion, "1.5.0")
         XCTAssertEqual(TC.appBundleID, "com.thermalcontrol.app")
         XCTAssertEqual(TC.helperBundleID, "com.thermalcontrol.helper")
     }

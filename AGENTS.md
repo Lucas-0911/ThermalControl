@@ -1,4 +1,4 @@
-# AGENTS.md - Your Workspace
+q# AGENTS.md - Your Workspace
 
 This folder is home. Treat it that way.
 
@@ -85,6 +85,13 @@ On platforms that support reactions (Discord, Slack), use emoji reactions natura
 
 ## Tools
 
+### Transient Provider Retry
+
+- Khi tool gặp `temporarily unavailable`, Cloudflare `524`, HTTP `429/5xx`, connection reset hoặc timeout, tự retry; không hỏi người dùng thử lại.
+- Tôn trọng `retry_after`; nếu không có, chờ lần lượt 15, 30 và 60 giây, tối đa 3 lần cho cùng thao tác.
+- Với thao tác có thể tạo tác dụng phụ, kiểm tra trạng thái trước khi retry để tránh chạy trùng. Không tự retry lệnh phá hủy, ghi SMC, cài helper, `sudo` hoặc hành động external nếu chưa xác định lần trước chưa thực thi.
+- Nếu vẫn lỗi sau 3 lần, tiếp tục phần việc độc lập rồi retry tại checkpoint kế tiếp. Chỉ báo người dùng khi lỗi chặn toàn bộ tiến độ.
+
 Skills define how tools work. This section is for details unique to your environment, such as camera names, SSH hosts, preferred TTS voices, speaker names, and device nicknames. Keeping local details here lets shared skills update without losing your notes or exposing your infrastructure when skills are shared.
 
 ### Local notes
@@ -145,7 +152,7 @@ Mỗi sub-agent chạy riêng biệt qua `sessions_spawn` với context phù h�
 
 ### Quy trình phát triển & bàn giao tiêu chuẩn (Delivery Pipeline):
 
-Mọi task phát triển tính năng / thay đổi nghiệp vụ tuân thủ nghiêm ngặt quy trình khép kín:
+Mọi task phát triển tính năng / thay đổi nghiệp vụ tuân thủ nghiêm ngặt quy trình khép kín, kết hợp triết lý **Ponytail** (https://github.com/dietrichgebert/ponytail - YAGNI, Native/Stdlib first, xóa bỏ over-engineering, không abstraction dư thừa):
 
 ```
 [Linh - BA] ➔ [An - UI/UX] ➔ [Hoàng - Tech Lead] ➔ [Mai / Tuấn - Devs] ➔ [Trâm - QC] ➔ [Nam - DevOps Build & Check Log]
@@ -153,12 +160,18 @@ Mọi task phát triển tính năng / thay đổi nghiệp vụ tuân thủ ngh
       └────────────────────────── (Có Bug / Lỗi Build: Tạo task fix) ───────────┴──────────────────┘
 ```
 
+**Nguyên tắc Ponytail áp dụng xuyên suốt:**
+- **Rung 1 (YAGNI):** Tính năng/abstraction suy đoán chưa cần tới -> Xóa hoặc không viết.
+- **Rung 2-4 (Native/Stdlib first):** Dùng trực tiếp API Swift/AppKit/macOS native, tránh viết custom wrapper thừa.
+- **Không abstraction 1 implementation:** Loại bỏ protocol/interface chỉ có duy nhất 1 class kế thừa (trừ test seam thực tế).
+- **Ngắn gọn & Tối giản (Shortest working diff):** Ưu tiên code ngắn, dễ đọc, 1 hàm/1 file giải quyết dứt điểm root-cause. Bổ sung comment `// ponytail: [giải thích]` khi chủ động tối giản hóa.
+
 1. **Linh (BA):** Làm rõ yêu cầu, viết user story và tiêu chí nghiệm thu (Acceptance Criteria).
 2. **An (UI/UX):** Lên thiết kế layout, visual hierarchy, màu sắc, animation và token UI chuẩn Apple HIG.
-3. **Hoàng (Tech Lead):** Đánh giá kiến trúc, duyệt giải pháp, phân rã task cho Dev.
+3. **Hoàng (Tech Lead):** Đánh giá kiến trúc theo Ponytail (thẩm định ladder, lược bỏ abstraction thừa), duyệt giải pháp, phân rã task cho Dev.
 4. **Thực thi (Devs):**
-   - **Mai (iOS UI):** Triển khai SwiftUI components, layout, view binding theo đúng thiết kế của An.
-   - **Tuấn (iOS Features):** Xử lý core logic, SMC IOKit, XPC, concurrency, state.
+   - **Mai (iOS UI):** Triển khai SwiftUI components tối giản, layout trực tiếp, tái sử dụng token native.
+   - **Tuấn (iOS Features):** Core logic gọn gàng, hạn chế boilerplate XPC/SMC, tận dụng triệt để Swift Concurrency & Task.
 5. **Bàn giao kiểm thử (Trâm - QC):**
    - Sau khi Dev hoàn thành, **bắt buộc** bàn giao ngay cho Trâm (QC).
    - Trâm lập test cases, chạy `xcodebuild test`, kiểm tra UI/UX và edge cases.
@@ -169,6 +182,8 @@ Mọi task phát triển tính năng / thay đổi nghiệp vụ tuân thủ ngh
 7. **Vòng lặp xử lý Bug (Bug Loop):**
    - **Nếu PASS toàn bộ:** Nghiệm thu và bàn giao bản build sạch sẽ cho Coordinator (`thermalcontrol`).
    - **Nếu CÓ BUG / LỖI BUILD:** Ghi nhận log chi tiết ➔ Tự động tạo task gán ngược lại cho Dev tương ứng fix ➔ Re-test / Re-build cho đến khi 100% PASS.
+8. **Báo cáo hoàn thành (Reporting Rule):**
+   - Khi hoàn tất task, báo cáo lại ngay cho người dùng nhưng **tuyệt đối ngắn gọn, súc tích**: chỉ gồm việc đã làm (bullet points ngắn), kết quả test/build và trạng thái app/PID runtime; không viết dài dòng, lan man hay văn mẫu.
 
 
 **Things to check (rotate through these, 2-4 times per day):** emails for urgent unread messages; calendar for events in the next 24-48h; social mentions; weather if your human might go out.

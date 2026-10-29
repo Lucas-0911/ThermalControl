@@ -1,12 +1,5 @@
 #!/bin/bash
 set -euo pipefail
-LABEL="com.thermalcontrol.helper"
-if [[ $EUID -ne 0 ]]; then
-  echo "Chạy: sudo $0"
-  exit 1
-fi
-launchctl bootout system/${LABEL} 2>/dev/null || true
-rm -f /Library/LaunchDaemons/${LABEL}.plist
-rm -f /Library/PrivilegedHelperTools/ThermalControlHelper
-rm -rf "/Library/Application Support/ThermalControl"
-echo "Đã gỡ helper + state.json."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Shared installer checks signatures and waits for successful restore before deleting anything.
+exec /bin/bash "$SCRIPT_DIR/install_helper.sh" --uninstall "${1:-/Applications/Thermal Control.app}"

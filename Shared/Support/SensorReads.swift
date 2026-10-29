@@ -19,11 +19,19 @@ enum SensorReads {
         for ps in list {
             guard let d = IOPSGetPowerSourceDescription(snap, ps)?.takeUnretainedValue() as? [String: Any] else { continue }
             if (d[kIOPSTypeKey] as? String) != kIOPSInternalBatteryType { continue }
-            let p = d[kIOPSCurrentCapacityKey] as? Int ?? 0
-            let ac = (d[kIOPSPowerSourceStateKey] as? String) == kIOPSACPowerValue
-            return (true, p, ac)
+            return batteryIO(description: d)
         }
         return (false, 0, false)
+    }
+
+    static func batteryIO(description: [String: Any]) -> (present: Bool, percent: Int, ac: Bool) {
+        guard let percent = description[kIOPSCurrentCapacityKey] as? Int,
+              (0...100).contains(percent),
+              let state = description[kIOPSPowerSourceStateKey] as? String,
+              state == kIOPSACPowerValue || state == kIOPSBatteryPowerValue else {
+            return (false, 0, false)
+        }
+        return (true, percent, state == kIOPSACPowerValue)
     }
 
     /// One fan channel from the canonical `F{i}Ac/Tg/Mn/Mx/Md` reads.

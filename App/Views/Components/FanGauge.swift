@@ -3,10 +3,13 @@ import SwiftUI
 /// Animated circular fan gauge.
 /// Redesigned with Apple HIG arc styling, monospaced digits, and smooth rotation.
 struct FanGauge: View {
+    @EnvironmentObject private var vm: ThermalViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let rpm: Double
     let minRPM: Double
     let maxRPM: Double
+    var glideGoal: Double? = nil
     var compact: Bool = false
 
     @State private var shownRPM: Double = 0
@@ -22,21 +25,30 @@ struct FanGauge: View {
     private var size: CGFloat { compact ? 82 : 130 }
     private var ringWidth: CGFloat { compact ? 8 : 11 }
 
+    private var shouldAnimate: Bool {
+        !reduceMotion && (vm.isMenuVisible || vm.isDashboardVisible) && (rpm > 0 || shownRPM > 1)
+    }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: false)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !shouldAnimate)) { context in
             gaugeContent
                 .onChange(of: context.date) { _, now in
-                    tick(now)
+                    if shouldAnimate {
+                        tick(now)
+                    }
                 }
         }
         .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue("\(Int(rpm.rounded())) RPM")
         .onAppear {
             shownRPM = rpm
             lastTick = Date()
         }
         .onChange(of: rpm) { _, new in
             lastTick = Date()
-            _ = new
+            if reduceMotion { shownRPM = glideGoal ?? new }
         }
     }
 
@@ -97,10 +109,18 @@ struct FanGauge: View {
 
     private func tick(_ now: Date) {
         var dt = now.timeIntervalSince(lastTick)
-        if dt <= 0 || dt > 0.1 { dt = 1.0 / 60.0 }
+        if dt <= 0 { dt = 1.0 / 60.0 }
+        if dt > 0.1 { dt = 0.1 }
         lastTick = now
-        let follow = 1 - exp(-dt / 0.35)
-        shownRPM += (rpm - shownRPM) * follow
+        if let goal = glideGoal, goal >= 0 {
+            let delta = goal - shownRPM
+            let maxStep = 250 * dt
+            if abs(delta) <= maxStep { shownRPM = goal }
+            else { shownRPM += maxStep * (delta > 0 ? 1 : -1) }
+        } else {
+            let follow = 1 - exp(-dt / 0.35)
+            shownRPM += (rpm - shownRPM) * follow
+        }
         let spin = max(shownRPM, 0)
         if spin > 30 {
             angle += dt * spin * 0.08

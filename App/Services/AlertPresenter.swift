@@ -1,16 +1,9 @@
 import AppKit
 
-/// Abstraction the view models depend on for surfacing errors, so no
-/// `NSAlert`/`NSApp` calls remain in the business layer (Phase 4).
+/// AppKit modal presenter. Owns the "one alert at a time" queueing flag.
+/// ponytail: direct concrete class without ErrorPresenting protocol (YAGNI: single implementation).
 @MainActor
-protocol ErrorPresenting {
-    func presentError(_ message: String, title: String?)
-}
-
-/// AppKit modal presenter. Owns the "one alert at a time" queueing flag that
-/// used to live in `ThermalViewModel`.
-@MainActor
-final class AlertPresenter: ErrorPresenting {
+final class AlertPresenter {
     enum PermissionChoice {
         case allow, sudo, later
     }
@@ -30,6 +23,22 @@ final class AlertPresenter: ErrorPresenting {
             alert.addButton(withTitle: L10n.t("ok"))
             alert.runModal()
             self?.alertQueued = false
+        }
+    }
+
+    func confirmRestore(completion: @escaping () -> Void) {
+        guard !alertQueued else { return }
+        alertQueued = true
+        DispatchQueue.main.async { [weak self] in
+            let alert = NSAlert()
+            alert.messageText = L10n.t("reset")
+            alert.informativeText = L10n.t("reset.confirm")
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: L10n.t("reset"))
+            alert.addButton(withTitle: L10n.t("cancel"))
+            let confirmed = alert.runModal() == .alertFirstButtonReturn
+            self?.alertQueued = false
+            if confirmed { completion() }
         }
     }
 

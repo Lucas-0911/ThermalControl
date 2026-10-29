@@ -34,14 +34,18 @@ xcodegen generate
 open ThermalControl.xcodeproj
 ```
 
-Trong Xcode phải thấy 2 target:
+Trong Xcode phải thấy 4 target:
 
 | Target | Vai trò |
 |---|---|
 | **ThermalControl** | App menu bar (SwiftUI) |
 | **ThermalControlHelper** | Daemon root, ghi SMC |
+| **ThermalControlTests** | App-hosted tests, fake XPC; không tự kết nối helper |
+| **ThermalControlHelperTests** | Hostless controller/auth tests, fake SMC |
 
-Không dùng được `xcodegen`: làm tay theo `docs/TAO_PROJECT_XCODE_THU_CONG.md`.
+Scheme `ThermalControl` chạy cả hai test targets. Test/build unsigned không chứng minh helper đã đủ điều kiện cài: privileged helper cần chữ ký Apple hợp lệ và app/helper cùng Team ID. Không có fallback ad-hoc.
+
+`project.yml` là source of truth. Không sửa project generated bằng tay; nếu generate lỗi, sửa `project.yml` rồi chạy lại `xcodegen generate`.
 
 ---
 
@@ -113,7 +117,9 @@ cp -R ~/Library/Developer/Xcode/DerivedData/ThermalControl-*/Build/Products/Debu
 
 ## 5. Cài helper (bắt buộc để điều khiển thật)
 
-Không có bước này thì app **không ghi được SMC**.
+Không có bước này thì app **không ghi được SMC**. Cài/cập nhật/gỡ helper làm thay đổi hệ thống và có thể ghi phần cứng; chỉ chạy khi đã đồng ý rõ.
+
+Installer xác minh chữ ký, yêu cầu app/helper khớp cùng Team. Update chạy signed app `--release-transient-control` để trả fan Auto/dừng xả, giữ charge intent; gỡ dùng `--restore-system-control` để bỏ charge policy. Helper protocol 2 cũ không handshake với protocol 3: installer sẽ chặn và giữ cài đặt cũ, không tự migration. Không dùng `--probe` cũ làm phép đọc thuần; bản mới parse diagnostics trước boot, `--selftest` cần thêm `--allow-hardware-writes`.
 
 ```bash
 cd ~/Downloads/ThermalControl
@@ -121,7 +127,7 @@ cd ~/Downloads/ThermalControl
 HELPER=$(ls -d ~/Library/Developer/Xcode/DerivedData/ThermalControl-*/Build/Products/Debug/ThermalControlHelper | head -1)
 echo "Helper: $HELPER"
 
-sudo bash Scripts/install_helper.sh "$HELPER"
+sudo bash Scripts/install_helper.sh "$HELPER" "/Applications/Thermal Control.app"
 ```
 
 Nhập mật khẩu Mac. Thành công sẽ in:
@@ -186,7 +192,7 @@ Sửa code **Helper** thì phải cài lại helper:
 sudo bash Scripts/uninstall_helper.sh
 
 HELPER=$(ls -d ~/Library/Developer/Xcode/DerivedData/ThermalControl-*/Build/Products/Debug/ThermalControlHelper | head -1)
-sudo bash Scripts/install_helper.sh "$HELPER"
+sudo bash Scripts/install_helper.sh "$HELPER" "/Applications/Thermal Control.app"
 ```
 
 ---

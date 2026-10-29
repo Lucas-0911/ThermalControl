@@ -1,8 +1,16 @@
 import SwiftUI
 
+// ponytail: Filter sections to allow multi-column layout in Dashboard without duplicating sensor view code.
+enum TempPanelSection {
+    case all
+    case processor
+    case system
+}
+
 struct TempPanel: View {
     @EnvironmentObject var vm: ThermalViewModel
     var compact: Bool = true
+    var section: TempPanelSection = .all
 
     private static let coreNames: [String: String] = [
         "Tp01": "CPU P1",
@@ -36,6 +44,24 @@ struct TempPanel: View {
         }
     }
 
+    private var filteredTemps: [TempReading] {
+        if compact {
+            return Array(vm.temps.prefix(4))
+        }
+        switch section {
+        case .all:
+            return vm.temps
+        case .processor:
+            return vm.temps.filter { t in
+                t.key.hasPrefix("Tp") || t.key.hasPrefix("Tg") || t.key.hasPrefix("Te") || t.key == SMCKey.tc0P.rawValue || t.key == SMCKey.tg0P.rawValue
+            }
+        case .system:
+            return vm.temps.filter { t in
+                !(t.key.hasPrefix("Tp") || t.key.hasPrefix("Tg") || t.key.hasPrefix("Te") || t.key == SMCKey.tc0P.rawValue || t.key == SMCKey.tg0P.rawValue)
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 8 : 12) {
             if compact {
@@ -51,19 +77,18 @@ struct TempPanel: View {
                 }
             }
 
-            if vm.temps.isEmpty {
+            if vm.temps.isEmpty || filteredTemps.isEmpty {
                 HStack {
                     Image(systemName: "slash.circle")
                         .foregroundStyle(TCTheme.secondaryLabel)
-                    Text(L10n.t("temp.none"))
+                    Text(L10n.t(vm.temperaturesUnavailable ? "status.stale" : "temp.none"))
                         .font(.caption)
                         .foregroundStyle(TCTheme.secondaryLabel)
                 }
                 .padding(.vertical, 4)
             } else {
-                let list = compact ? Array(vm.temps.prefix(4)) : vm.temps
                 VStack(spacing: 8) {
-                    ForEach(list, id: \.key) { t in
+                    ForEach(filteredTemps, id: \.key) { t in
                         HStack(spacing: DS.Space.s + 2) {
                             Text(label(for: t.key))
                                 .font(.system(size: 11, weight: .medium))

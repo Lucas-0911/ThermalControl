@@ -13,8 +13,8 @@ final class PowerObserver {
     private var root: io_connect_t = 0
     private var notifier: io_object_t = 0
     private var port: IONotificationPortRef?
-    var onSleep: (() -> Void)?
-    var onWake: (() -> Void)?
+    var onSleep: (() async -> Void)?
+    var onWake: (() async -> Void)?
 
     func start() {
         let ctx = Unmanaged.passUnretained(self)
@@ -27,10 +27,17 @@ final class PowerObserver {
             case PowerMessage.canSystemSleep:
                 if let arg { IOAllowPowerChange(me.root, Int(bitPattern: arg)) }
             case PowerMessage.systemWillSleep:
-                me.onSleep?()
-                if let arg { IOAllowPowerChange(me.root, Int(bitPattern: arg)) }
+                guard let arg else { return }
+                let root = me.root
+                let token = Int(bitPattern: arg)
+                let sleep = me.onSleep
+                Task {
+                    await sleep?()
+                    IOAllowPowerChange(root, token)
+                }
             case PowerMessage.systemHasPoweredOn:
-                me.onWake?()
+                let wake = me.onWake
+                Task { await wake?() }
             default:
                 break
             }

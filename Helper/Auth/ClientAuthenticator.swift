@@ -1,40 +1,31 @@
 import Foundation
-import os
+import Security
 
-/// SecCode-based authentication of incoming XPC connections: only callers
-/// signed by the same Team ID as this helper are accepted.
-///
-/// Extracted verbatim from the old `HelperDelegate` god object (Phase 3c).
-/// Logic is deliberately unchanged — weakening these checks would let any
-/// local process drive the root SMC daemon.
+/// The root helper and its XPC clients must have valid Apple-issued signatures.
 enum ClientAuthenticator {
-    /// Team IDs of this helper binary. Empty when unsigned (dev builds); in
-    /// that case verification falls back to "accept" to keep `--probe` and
-    /// unsigned dev workflows working, matching the historical behavior.
-    static func ownTeams() -> Set<String> {
-        var code: SecCode?
-        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return [] }
-        var sc: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &sc) == errSecSuccess, let sc else { return [] }
-        var info: CFDictionary?
-        guard SecCodeCopySigningInformation(sc, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
-              let dict = info as? [String: Any],
-              let team = dict[kSecCodeInfoTeamIdentifier as String] as? String else { return [] }
-        return [team]
+    static func clientRequirement(teamID: String) -> String? {
+        // Team IDs are ten ASCII letters/digits; reject requirement-language injection.
+        guard teamID.utf8.count == 10,
+              teamID.utf8.allSatisfy({ (65...90).contains($0) || (48...57).contains($0) }) else { return nil }
+        return "anchor apple generic and identifier \"com.thermalcontrol.app\" and certificate leaf[subject.OU] = \"\(teamID)\""
     }
 
-    static func verify(connection c: NSXPCConnection, teamIDs: Set<String>) -> Bool {
+    static func ownTeam() -> String? {
         var code: SecCode?
-        var err = SecCodeCopyGuestWithAttributes(nil, [kSecGuestAttributePid: c.processIdentifier] as CFDictionary, [], &code)
-        guard err == errSecSuccess, let code else { return teamIDs.isEmpty }
-        var sc: SecStaticCode?
-        err = SecCodeCopyStaticCode(code, [], &sc)
-        guard err == errSecSuccess, let sc else { return false }
+        var requirement: SecRequirement?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecRequirementCreateWithString(
+                "anchor apple generic and identifier \"com.thermalcontrol.helper\"" as CFString,
+                [], &requirement
+              ) == errSecSuccess, let requirement,
+              SecCodeCheckValidity(code, [], requirement) == errSecSuccess else { return nil }
+
+        var staticCode: SecStaticCode?
         var info: CFDictionary?
-        err = SecCodeCopySigningInformation(sc, SecCSFlags(rawValue: kSecCSSigningInformation), &info)
-        guard err == errSecSuccess, let dict = info as? [String: Any] else { return teamIDs.isEmpty }
-        if teamIDs.isEmpty { return true }
-        let team = dict[kSecCodeInfoTeamIdentifier as String] as? String
-        return team.map { teamIDs.contains($0) } ?? false
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode,
+              SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info) == errSecSuccess,
+              let team = (info as? [String: Any])?[kSecCodeInfoTeamIdentifier as String] as? String,
+              clientRequirement(teamID: team) != nil else { return nil }
+        return team
     }
 }

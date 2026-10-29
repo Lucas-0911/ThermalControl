@@ -4,55 +4,58 @@ import IOKit.ps
 import os
 
 enum SensorReader {
-    private static let smc = SMCService()
-    private static var smcReady = false
+    private final class LocalSMC: @unchecked Sendable {
+        let service = SMCService()
+        private let lock = NSLock()
+        private var ready = false
 
-    private static func smcOrNil() -> (any SMCProtocol)? {
-        if smcReady { return smc }
-        do {
-            try smc.open()
-            smcReady = true
-            return smc
-        } catch {
-            Logger.smc.error("SensorReader open failed: \(error.localizedDescription, privacy: .public)")
-            return nil
+        func withService<T>(_ body: (any SMCProtocol) -> T) -> T? {
+            lock.lock()
+            defer { lock.unlock() }
+            if !ready {
+                do {
+                    try service.open()
+                    ready = true
+                } catch {
+                    Logger.smc.error("SensorReader open failed: \(error.localizedDescription, privacy: .public)")
+                    return nil
+                }
+            }
+            return body(service)
         }
     }
+
+    private static let smc = LocalSMC()
 
     static func battery() -> (present: Bool, percent: Int, ac: Bool) {
         SensorReads.batteryIO()
     }
 
     static func fans() -> [FanChannel] {
-        guard let smc = smcOrNil() else { return [] }
-        let n = Int((try? smc.readUInt8(SMCKey.fanCount.rawValue)) ?? 0)
-        guard n > 0 else { return [] }
-        return (0..<n).map { i in
-            let modeKey = smc.keyExists(SMCKey.fanMode(i).rawValue) ? SMCKey.fanMode(i).rawValue : SMCKey.fanModeLower(i).rawValue
-            return SensorReads.fanChannel(index: i, modeKey: modeKey, smc: smc)
-        }
+        smc.withService { smc in
+            let n = Int((try? smc.readUInt8(SMCKey.fanCount.rawValue)) ?? 0)
+            guard n > 0 else { return [] }
+            return (0..<n).map { i in
+                let modeKey = smc.keyExists(SMCKey.fanMode(i).rawValue) ? SMCKey.fanMode(i).rawValue : SMCKey.fanModeLower(i).rawValue
+                return SensorReads.fanChannel(index: i, modeKey: modeKey, smc: smc)
+            }
+        } ?? []
     }
 
     static func temps() -> [TempReading] {
-        guard let smc = smcOrNil() else { return [] }
-        return TC.tempKeys.compactMap { k in
-            guard let v = smc.readCelsius(k) else { return nil }
-            return TempReading(key: k, celsius: v)
-        }
-    }
-
-    static func amperageMA() -> Double {
-        let p = power()
-        if abs(p.batteryMA) > 1 { return p.batteryMA }
-        guard let smc = smcOrNil() else { return 0 }
-        return (try? smc.readDouble(SMCKey.b0AC.rawValue)) ?? 0
+        smc.withService { smc in
+            TC.tempKeys.compactMap { k in
+                guard let v = smc.readCelsius(k) else { return nil }
+                return TempReading(key: k, celsius: v)
+            }
+        } ?? []
     }
 
     struct PowerInfo {
+        var available = false
         var present = false
         var percent = 0
         var ac = false
-        var charging = false
         var batteryMA: Double = 0
         var voltageMV: Double = 0
         var adapterRatedW: Double = 0
@@ -68,7 +71,7 @@ enum SensorReader {
         info.ac = io.ac
 
         guard let props = smartBatteryProps() else { return info }
-        info.charging = bool(props["IsCharging"])
+        info.available = true
         info.voltageMV = num(props["Voltage"])
         let instant = num(props["InstantAmperage"])
         info.batteryMA = instant != 0 ? instant : num(props["Amperage"])

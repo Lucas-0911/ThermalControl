@@ -1,10 +1,20 @@
 import SwiftUI
 
+// ponytail: Section filter avoids duplicating battery UI code between MenuBar and multi-column Dashboard.
+enum BatteryPanelSection {
+    case all
+    case visual
+    case controls
+}
+
 struct BatteryPanel: View {
     @EnvironmentObject var vm: ThermalViewModel
     @EnvironmentObject var battery: BatteryViewModel
     @EnvironmentObject var power: PowerViewModel
     var compact: Bool
+    var section: BatteryPanelSection = .all
+    var allowsEditing = true
+    @State private var confirmingDischarge = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 10 : 16) {
@@ -31,62 +41,161 @@ struct BatteryPanel: View {
                 }
                 .padding(.vertical, 4)
             } else {
-                percentHeader
-
-                // Continuous Battery Capacity Bar
-                batteryCapacityBar
-
-                powerCharts
-
-                if !compact {
-                    Text(battery.chargeStatusLabel)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(battery.maintainActive ? TCTheme.charge : TCTheme.secondaryLabel)
+                if section == .all || section == .visual {
+                    visualContent
                 }
 
-                // Native Segmented Control for Charge Mode
-                HStack(spacing: 0) {
-                    ChoicePill(
-                        title: L10n.t("battery.full"),
-                        symbol: "battery.100",
-                        selected: battery.chargeMode == .full,
-                        tint: TCTheme.battery,
-                        enabled: true
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            battery.setChargeFull()
-                        }
-                    }
-                    Divider().frame(height: 16)
-                    ChoicePill(
-                        title: L10n.t("battery.limit"),
-                        symbol: "shield.lefthalf.filled",
-                        selected: battery.chargeMode == .custom,
-                        tint: TCTheme.charge,
-                        enabled: true
-                    ) {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                            battery.setChargeCustom()
-                        }
-                    }
-                }
-                .padding(2)
-                .background(Color(nsColor: .controlColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(TCTheme.separator.opacity(0.35), lineWidth: 0.5)
-                )
-
-                if battery.chargeMode == .custom {
-                    chargeRows
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-
-                if !compact {
-                    forceDischargeSection
+                if section == .all || section == .controls {
+                    controlsContent
                 }
             }
         }
+    }
+
+    private var visualContent: some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 14) {
+            percentHeader
+
+            // Continuous Battery Capacity Bar
+            batteryCapacityBar
+
+            if battery.powerUnavailable {
+                Label(L10n.t("status.stale"), systemImage: "questionmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                powerCharts
+            }
+
+            if !compact {
+                Text(battery.chargeStatusLabel)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(battery.maintainActive ? TCTheme.charge : TCTheme.secondaryLabel)
+            }
+        }
+    }
+
+    private var controlsEnabled: Bool {
+        vm.controlsEnabled && battery.batteryControl && battery.canControlCharge
+            && battery.hasConfirmedChargeState && !battery.applyingCharge
+    }
+
+    private var controlsContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if !battery.hasConfirmedChargeState {
+                Label(L10n.t("error.readback"), systemImage: "questionmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if battery.applyingCharge {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.t("status.applying")).font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            chargeModeRow
+            if compact && !allowsEditing && battery.chargeMode == .custom {
+                menuPresetRow
+            }
+
+            if let error = battery.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(TCTheme.danger)
+            }
+
+            if allowsEditing {
+                if battery.editingCharge {
+                    chargeRows
+                } else {
+                    Button(L10n.t("battery.edit"), action: battery.beginChargeEdits)
+                        .disabled(!controlsEnabled)
+                }
+            }
+            if battery.needsDischargeStop {
+                if battery.forceDischarge {
+                    Text(L10n.t("battery.force.progress", battery.dischargeTargetPercent,
+                                Int(ceil(battery.dischargeRemainingSeconds / 60))))
+                        .font(.caption)
+                }
+                if battery.isDischargeStopPending {
+                    Label(L10n.t("battery.force.stop.pending"), systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(TCTheme.danger)
+                }
+                Button(L10n.t("battery.force.stop")) { battery.setForceDischarge(false) }
+                    .buttonStyle(.borderedProminent)
+            }
+            if allowsEditing && battery.forceDischargeControl {
+                forceDischargeSection
+            }
+        }
+    }
+
+    private var menuPresetRow: some View {
+        presetChrome {
+            menuPreset(60)
+            Divider().frame(height: 16)
+            menuPreset(80)
+            Divider().frame(height: 16)
+            menuPreset(90)
+        }
+    }
+
+    private func menuPreset(_ upper: Int) -> some View {
+        ChoicePill(
+            title: "\(upper)%",
+            symbol: "shield.lefthalf.filled",
+            selected: battery.menuPresetIsSelected(upper: upper),
+            tint: TCTheme.charge,
+            enabled: controlsEnabled
+        ) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                battery.applyMenuPreset(upper: upper)
+            }
+        }
+    }
+
+    private var chargeModeRow: some View {
+        presetChrome {
+            ChoicePill(
+                title: L10n.t("battery.full"),
+                symbol: "battery.100",
+                selected: battery.chargeMode == .full,
+                tint: TCTheme.battery,
+                enabled: controlsEnabled
+            ) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    battery.setChargeFull()
+                }
+            }
+            Divider().frame(height: 16)
+            ChoicePill(
+                title: L10n.t("battery.limit"),
+                symbol: "shield.lefthalf.filled",
+                selected: battery.chargeMode == .custom,
+                tint: TCTheme.charge,
+                enabled: controlsEnabled
+            ) {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                    if compact && !allowsEditing {
+                        battery.selectMenuLimit()
+                    } else {
+                        battery.setChargeCustom()
+                    }
+                }
+            }
+        }
+    }
+
+    private func presetChrome<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack(spacing: 0, content: content)
+            .padding(2)
+            .background(Color(nsColor: .controlColor).opacity(0.8), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(TCTheme.separator.opacity(0.35), lineWidth: 0.5)
+            )
     }
 
     private var percentHeader: some View {
@@ -121,7 +230,7 @@ struct BatteryPanel: View {
                         .monospacedDigit()
                         .foregroundStyle(TCTheme.secondaryLabel)
                     if battery.adapterWatts > 0 {
-                        Text(String(format: "%.0fW In", battery.adapterWatts))
+                        Text(L10n.t("power.adapter", battery.adapterWatts))
                             .font(.system(size: 11))
                             .foregroundStyle(TCTheme.tertiaryLabel)
                     }
@@ -159,11 +268,9 @@ struct BatteryPanel: View {
                 value: battery.chargePercentBinding,
                 tint: TCTheme.charge,
                 step: 5,
-                minVal: 50,
-                maxVal: 95,
-                enabled: true,
-                onCommit: { battery.applyChargeLimit() },
-                onLive: { battery.scheduleChargeStop() }
+                minVal: ChargeLimits.minUpper,
+                maxVal: ChargeLimits.maxPercent,
+                enabled: controlsEnabled
             )
 
             ConfigNumberRow(
@@ -172,84 +279,77 @@ struct BatteryPanel: View {
                 value: battery.chargeLowerBinding,
                 tint: TCTheme.charge,
                 step: 5,
-                minVal: 40,
-                maxVal: battery.chargeUpper - 1,
-                enabled: true,
-                onCommit: { battery.applyChargeLimit() },
-                onLive: { battery.scheduleChargeApply() }
+                minVal: ChargeLimits.minPercent,
+                maxVal: battery.savedChargeUpper - ChargeLimits.minGap,
+                enabled: controlsEnabled
             )
 
-            Text(L10n.t("charge.range", battery.chargeUpper, battery.chargeLower))
+            Text(L10n.t("charge.range", battery.savedChargeUpper, battery.draftChargeLower))
                 .font(.system(size: 11))
                 .foregroundStyle(TCTheme.secondaryLabel)
                 .padding(.horizontal, 4)
+            HStack {
+                Text(L10n.t("edit.draft"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.t("cancel"), action: battery.cancelChargeEdits)
+                    .disabled(battery.applyingCharge)
+                Button(L10n.t("apply"), action: battery.applyChargeLimit)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!controlsEnabled)
+            }
         }
     }
 
+    // ponytail: Always show both Power and Usage sparklines side-by-side so power in vs power drain are both visible.
     private var powerCharts: some View {
-        Group {
-            if compact {
-                if battery.externalAC {
-                    PowerSparkline(
-                        samples: power.powerHistory,
-                        maxWatts: power.powerChartMax,
-                        compact: true,
-                        title: L10n.t("power.chart"),
-                        tint: TCTheme.power
-                    )
-                } else {
-                    PowerSparkline(
-                        samples: power.usageHistory,
-                        maxWatts: power.usageChartMax,
-                        compact: true,
-                        title: L10n.t("usage.chart"),
-                        tint: TCTheme.fan
-                    )
-                }
-            } else {
-                HStack(spacing: DS.Space.m) {
-                    if battery.externalAC {
-                        PowerSparkline(
-                            samples: power.powerHistory,
-                            maxWatts: power.powerChartMax,
-                            compact: false,
-                            title: L10n.t("power.chart"),
-                            tint: TCTheme.power
-                        )
-                    }
-                    PowerSparkline(
-                        samples: power.usageHistory,
-                        maxWatts: power.usageChartMax,
-                        compact: false,
-                        title: L10n.t("usage.chart"),
-                        tint: TCTheme.fan
-                    )
-                }
-            }
+        HStack(spacing: compact ? 8 : DS.Space.m) {
+            PowerSparkline(
+                samples: power.powerHistory,
+                maxWatts: power.powerChartMax,
+                compact: compact,
+                title: L10n.t("power.chart"),
+                tint: TCTheme.power
+            )
+            PowerSparkline(
+                samples: power.usageHistory,
+                maxWatts: power.usageChartMax,
+                compact: compact,
+                title: L10n.t("usage.chart"),
+                tint: TCTheme.temperature
+            )
         }
     }
 
     private var forceDischargeSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: Binding(
-                get: { battery.forceDischarge },
-                set: { battery.setForceDischarge($0) }
-            )) {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(TCTheme.danger)
-                    Text(L10n.t("battery.force"))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(TCTheme.label)
+        DisclosureGroup(L10n.t("battery.advanced")) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.t("battery.force.hint"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if battery.dischargeStopVerified && battery.dischargeStopReason != nil && !battery.forceDischarge {
+                    Text(battery.dischargeStopLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if !battery.needsDischargeStop {
+                    Button(L10n.t("battery.force.start")) { confirmingDischarge = true }
+                        .disabled(!battery.canStartDischarge)
+                    if !battery.canStartDischarge {
+                        Text(L10n.t("battery.force.precondition"))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
-            .toggleStyle(.checkbox)
-            .controlSize(.small)
-
-            Text(L10n.t("battery.force.hint"))
-                .font(.caption2)
-                .foregroundStyle(TCTheme.secondaryLabel)
-                .padding(.leading, 18)
+            .padding(.top, 8)
+        }
+        .alert(L10n.t("battery.force.confirm.title"), isPresented: $confirmingDischarge) {
+            Button(L10n.t("cancel"), role: .cancel) {}
+            Button(L10n.t("battery.force.start"), role: .destructive) { battery.setForceDischarge(true) }
+        } message: {
+            Text(L10n.t("battery.force.confirm.body", battery.chargeUpper))
         }
         .padding(.top, 4)
     }

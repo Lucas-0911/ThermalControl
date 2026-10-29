@@ -3,6 +3,7 @@ import AppKit
 /// Single place for finding the dashboard window by title.
 /// Previously duplicated with subtle differences in `MenuBarView.mainWindow()`
 /// and `ThermalViewModel.openDashboard()`.
+@MainActor
 enum WindowLocator {
     static let dashboardTitle = "Thermal Control"
 

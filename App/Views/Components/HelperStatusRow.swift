@@ -13,20 +13,28 @@ struct HelperStatusRow: View {
             VStack(alignment: .leading, spacing: DS.Space.s) {
                 if detailed {
                     LabeledContent(L10n.t("helper"), value: vm.helperStatusText)
-                    LabeledContent("SMAppService", value: vm.smAppServiceState)
+                    LabeledContent("SMAppService", value: Self.serviceLabel(vm.smAppServiceState))
                     LabeledContent(L10n.t("helper.fan"), value: fan.fanControl ? L10n.t("yes") : L10n.t("no"))
                     LabeledContent(L10n.t("helper.battery"), value: battery.batteryControl ? L10n.t("yes") : L10n.t("no"))
                 } else {
-                    Text(vm.helperStatusText)
-                        .font(.caption)
-                        .foregroundStyle(TCTheme.secondaryLabel)
+                    HStack(spacing: 6) {
+                        if vm.connectionState == .connecting || vm.connectionState == .restoring {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text(vm.helperStatusText)
+                            .font(.caption)
+                            .foregroundStyle(TCTheme.secondaryLabel)
+                    }
                 }
                 if vm.connectionState != .connected {
                     HStack(spacing: DS.Space.s) {
-                        Button(L10n.t("perm.allow")) { vm.showHelperPermissionAlert(force: true) }
+                        Button(L10n.t(vm.isInstallingHelper ? "helper.installing" : "perm.allow")) {
+                            vm.showHelperPermissionAlert(force: true)
+                        }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .disabled(vm.connectionState == .connecting)
+                            .disabled(vm.connectionState == .connecting || vm.isInstallingHelper)
                         Button(L10n.t("helper.loginItems")) { vm.openLoginItems() }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -40,6 +48,17 @@ struct HelperStatusRow: View {
                         .controlSize(.small)
                 }
             }
+        }
+    }
+
+    static func serviceLabel(_ state: String) -> String {
+        switch state {
+        case "enabled": return L10n.t("enabled")
+        case "requiresApproval": return L10n.t("status.approval")
+        case "notRegistered": return L10n.t("helper.notRegistered")
+        case "notFound": return L10n.t("helper.notFound")
+        case "unsupported": return L10n.t("install.need13")
+        default: return L10n.t("helper.unknown")
         }
     }
 }
